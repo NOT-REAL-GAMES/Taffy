@@ -531,5 +531,3 @@ class TaffyAIRuntime {
 ---
 
 **Taffy isn't just an asset format - it's the foundation for the next generation of human-computer interaction. A world where digital beings are indistinguishable from humans in their psychological complexity, where empathy can be taught through authentic interaction, and where technology finally serves humanity's deepest need: to understand and connect with each other.**
-
-**Welcome to the AI-Native era of interactive experiences.** 🚀🧠✨
