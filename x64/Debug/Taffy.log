@@ -1,0 +1,44 @@
+﻿  Taffy.cpp
+C:\Projects\Taffy\include\taffy.h(57,27): warning C4293: '<<': shift count negative or too big, undefined behavior
+  (compiling source file 'Taffy.cpp')
+  
+C:\Projects\Taffy\include\taffy.h(58,33): warning C4293: '<<': shift count negative or too big, undefined behavior
+  (compiling source file 'Taffy.cpp')
+  
+C:\Projects\Taffy\include\taffy.h(59,35): warning C4293: '<<': shift count negative or too big, undefined behavior
+  (compiling source file 'Taffy.cpp')
+  
+C:\Projects\Taffy\include\taffy.h(60,30): warning C4293: '<<': shift count negative or too big, undefined behavior
+  (compiling source file 'Taffy.cpp')
+  
+C:\Projects\Taffy\Taffy.cpp(33,78): warning C4244: 'argument': conversion from 'float' to 'int64_t', possible loss of data
+C:\Projects\Taffy\Taffy.cpp(33,74): warning C4244: 'argument': conversion from 'float' to 'int64_t', possible loss of data
+C:\Projects\Taffy\Taffy.cpp(33,70): warning C4244: 'argument': conversion from 'float' to 'int64_t', possible loss of data
+C:\Projects\Taffy\Taffy.cpp(190,22): warning C4566: character represented by universal-character-name '\U0001F504' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(206,30): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(209,30): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(214,34): warning C4566: character represented by universal-character-name '\u2192' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(218,30): warning C4566: character represented by universal-character-name '\u2717' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(258,26): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(261,26): warning C4566: character represented by universal-character-name '\u2717' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(331,22): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(360,22): warning C4566: character represented by universal-character-name '\u26A0' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(397,22): warning C4566: character represented by universal-character-name '\u274C' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(401,18): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(522,22): warning C4566: character represented by universal-character-name '\u274C' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(526,18): warning C4566: character represented by universal-character-name '\U0001F680' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(529,18): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(540,35): warning C4566: character represented by universal-character-name '\U0001F3AF' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(542,35): warning C4566: character represented by universal-character-name '\U0001F31F' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(543,22): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(544,22): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(545,22): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+C:\Projects\Taffy\Taffy.cpp(546,22): warning C4566: character represented by universal-character-name '\u2713' cannot be represented in the current code page (1252)
+spirv-cross-cored.lib(spirv_cross.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-cored.lib(spirv_cross.obj)' or at ''; linking object as if no debug info
+spirv-cross-cored.lib(spirv_cfg.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-cored.lib(spirv_cfg.obj)' or at ''; linking object as if no debug info
+spirv-cross-cored.lib(spirv_cross_parsed_ir.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-cored.lib(spirv_cross_parsed_ir.obj)' or at ''; linking object as if no debug info
+spirv-cross-cored.lib(spirv_parser.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-cored.lib(spirv_parser.obj)' or at ''; linking object as if no debug info
+spirv-cross-glsld.lib(spirv_glsl.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-glsld.lib(spirv_glsl.obj)' or at ''; linking object as if no debug info
+spirv-cross-hlsld.lib(spirv_hlsl.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-hlsld.lib(spirv_hlsl.obj)' or at ''; linking object as if no debug info
+spirv-cross-msld.lib(spirv_msl.obj) : warning LNK4099: PDB '' was not found with 'spirv-cross-msld.lib(spirv_msl.obj)' or at ''; linking object as if no debug info
+  Taffy.vcxproj -> C:\Projects\Tremor\x64\Debug\Taffy.exe
