@@ -75,13 +75,13 @@ Taffy represents the evolution of game assets - moving from static geometry file
 - **Intelligent composition**: Assets combine meaningfully
 - **AI dependency injection**: Local LLMs as composable components
 
-#### 9. **Master/Overlay System** *(Revolutionary)*
+#### 9. **Master/Overlay System** 
 - **Non-destructive modding**: Bethesda-style overlay system for assets
 - **Stackable modifications**: Multiple overlays can enhance the same base asset
 - **Chunk-level overrides**: Modify specific parts without affecting others
 - **Cross-engine mod compatibility**: Overlays work universally across all engines
 
-#### 10. **Dual-Query AI Architecture** *(Revolutionary)*
+#### 10. **Dual-Query AI Architecture** 
 - **Context Analysis AI**: Understands what's REALLY happening in interactions
 - **Content Generation AI**: Creates appropriate responses with psychological depth
 - **Subtext and nuance**: First format to support genuine human-like complexity
