@@ -40,7 +40,17 @@ namespace Taffy {
             ShaderReplace = 1,      // Replace specific shader by hash
             VertexColorChange = 2,  // Change vertex colors
             MaterialReplace = 3,    // Replace material properties
-            GeometryModify = 4      // Modify geometry data
+            GeometryModify = 4,      // Modify geometry data
+            VertexPositionChange = 5,    // Modify individual vertex positions
+            VertexAttributeChange = 6,   // Modify any vertex attribute
+            GeometryTransform = 7,       // Apply transformation matrix to all vertices
+            GeometryScale = 8,           // Scale geometry
+            GeometryRotate = 9,          // Rotate geometry
+            GeometryTranslate = 10,      // Translate geometry
+            UVModification = 11,         // Modify UV coordinates
+            NormalRecalculation = 12,    // Recalculate normals after position changes
+            VertexSubset = 13            // Apply operation to subset of vertices
+        
         } operation_type;
 
         uint32_t target_chunk_type; // ChunkType to target

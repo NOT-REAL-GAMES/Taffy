@@ -180,7 +180,48 @@ namespace Taffy {
             Vec3Q bounds_max;
             float lod_distance;
             uint32_t lod_level;
-            uint32_t reserved[8];
+
+            // Mesh shader configuration
+            enum RenderMode : uint32_t {
+                Traditional = 0,    // Use vertex/index buffers
+                MeshShader = 1      // Use mesh shader
+            } render_mode;
+
+            uint32_t ms_max_vertices;      // Mesh shader max output vertices
+            uint32_t ms_max_primitives;    // Mesh shader max output primitives
+            uint32_t ms_workgroup_size[3]; // Mesh shader local work size
+
+            enum PrimitiveType : uint32_t {
+                Triangles = 0,
+                Lines = 1,
+                Points = 2
+            } ms_primitive_type;
+
+            uint32_t ms_flags;             // Additional mesh shader flags
+            uint32_t reserved[2];          // Reduced for new fields
+        };
+
+        // Vertex attribute descriptor for data-driven shaders
+        struct VertexAttribute {
+            enum Type : uint32_t {
+                Float = 0,
+                Float2 = 1,
+                Float3 = 2,
+                Float4 = 3,
+                Int = 4,
+                Int2 = 5,
+                Int3 = 6,
+                Int4 = 7,
+                UInt = 8,
+                UInt2 = 9,
+                UInt3 = 10,
+                UInt4 = 11
+            };
+
+            Type type;
+            uint32_t offset;    // Offset in bytes from start of vertex
+            uint32_t location;  // Shader output location
+            char name[32];      // Semantic name (position, normal, color, etc.)
         };
 
         struct MaterialChunk {
