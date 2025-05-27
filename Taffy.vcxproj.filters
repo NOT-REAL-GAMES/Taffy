@@ -18,12 +18,24 @@
     <ClCompile Include="Taffy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="include\tools.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\taffy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\quan.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\overlay.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="asset.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\tools.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

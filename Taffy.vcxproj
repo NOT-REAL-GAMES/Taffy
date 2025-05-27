@@ -134,11 +134,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="include\tools.cpp" />
     <ClCompile Include="Taffy.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="asset.h" />
+    <ClInclude Include="include\overlay.h" />
     <ClInclude Include="include\quan.h" />
     <ClInclude Include="include\taffy.h" />
+    <ClInclude Include="include\tools.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
