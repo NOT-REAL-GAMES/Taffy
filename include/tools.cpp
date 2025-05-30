@@ -69,7 +69,9 @@ namespace tremor::taffy::tools {
     overlay.add_target_asset("assets/tri.taf", "^1.0.0");  // Target the new format
     
     // Change vertex 1 (the green one) to hot pink
-    overlay.add_vertex_color_change(1, 1.0f, 0.41f, 0.7f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(0, 1.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(1, 1.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(2, 1.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
     
     std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
     
@@ -1300,9 +1302,9 @@ void main() {
                     << ", max_vertices = " << config.max_vertices
                     << ", max_primitives = " << config.max_primitives << ") out;\n\n";
 
-                // Storage buffer for vertex data
+                // Storage buffer for vertex data - FIXED: use uint array instead of uint8_t
                 shader << "layout(set = 0, binding = 0) readonly buffer VertexBuffer {\n";
-                shader << "    uint8_t vertex_data[];\n";
+                shader << "    uint vertex_data[];\n";  // Changed from uint8_t to uint
                 shader << "};\n\n";
 
                 // Push constants for runtime data
@@ -1365,7 +1367,12 @@ void main() {
                 bool hasColor = false;
                 for (const auto& attr : config.attributes) {
                     if (strcmp(attr.name, "color") == 0) {
-                        shader << "    fragColor = " << attr.name << ";\n";
+                        if (attr.type == attr.Float3) {
+                            shader << "    fragColor = vec4(" << attr.name << ",1.0);\n";
+                        }
+                        else {
+                            shader << "    fragColor = " << attr.name << ";\n";
+                        }
                         hasColor = true;
                         break;
                     }
@@ -1393,40 +1400,46 @@ void main() {
             }
 
             static void generateAttributeAccessors(std::stringstream& shader, const ShaderConfig& config) {
-                // Generate helper functions to read typed data from byte buffer
+                // Generate helper functions to read typed data from uint buffer
                 shader << "// Attribute accessor functions\n";
 
                 for (const auto& attr : config.attributes) {
                     shader << getGLSLType(attr.type) << " get_" << attr.name
                         << "(uint vertex_offset) {\n";
-                    shader << "    uint offset = vertex_offset + " << attr.offset << ";\n";
+
+                    // Since vertex data is stored as floats and all attributes are float-based,
+                    // we can assume 4-byte alignment and read directly
+                    shader << "    uint offset = (vertex_offset + " << attr.offset << ") / 4;\n";
 
                     switch (attr.type) {
                     case VertexAttribute::Float:
-                        shader << "    return uintBitsToFloat(uint(vertex_data[offset]) | \n";
-                        shader << "                          (uint(vertex_data[offset+1]) << 8) |\n";
-                        shader << "                          (uint(vertex_data[offset+2]) << 16) |\n";
-                        shader << "                          (uint(vertex_data[offset+3]) << 24));\n";
+                        shader << "    return uintBitsToFloat(vertex_data[offset]);\n";
+                        break;
+
+                    case VertexAttribute::Float2:
+                        shader << "    return vec2(\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset]),\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset + 1])\n";
+                        shader << "    );\n";
                         break;
 
                     case VertexAttribute::Float3:
                         shader << "    return vec3(\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset]) | (uint(vertex_data[offset+1]) << 8) | (uint(vertex_data[offset+2]) << 16) | (uint(vertex_data[offset+3]) << 24)),\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset+4]) | (uint(vertex_data[offset+5]) << 8) | (uint(vertex_data[offset+6]) << 16) | (uint(vertex_data[offset+7]) << 24)),\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset+8]) | (uint(vertex_data[offset+9]) << 8) | (uint(vertex_data[offset+10]) << 16) | (uint(vertex_data[offset+11]) << 24))\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset]),\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset + 1]),\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset + 2])\n";
                         shader << "    );\n";
                         break;
 
                     case VertexAttribute::Float4:
                         shader << "    return vec4(\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset]) | (uint(vertex_data[offset+1]) << 8) | (uint(vertex_data[offset+2]) << 16) | (uint(vertex_data[offset+3]) << 24)),\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset+4]) | (uint(vertex_data[offset+5]) << 8) | (uint(vertex_data[offset+6]) << 16) | (uint(vertex_data[offset+7]) << 24)),\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset+8]) | (uint(vertex_data[offset+9]) << 8) | (uint(vertex_data[offset+10]) << 16) | (uint(vertex_data[offset+11]) << 24)),\n";
-                        shader << "        uintBitsToFloat(uint(vertex_data[offset+12]) | (uint(vertex_data[offset+13]) << 8) | (uint(vertex_data[offset+14]) << 16) | (uint(vertex_data[offset+15]) << 24))\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset]),\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset + 1]),\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset + 2]),\n";
+                        shader << "        uintBitsToFloat(vertex_data[offset + 3])\n";
                         shader << "    );\n";
                         break;
 
-                        // Add other types as needed...
                     default:
                         shader << "    return " << getGLSLDefaultValue(attr.type) << ";\n";
                         break;
@@ -1510,15 +1523,12 @@ void main() {
                 }
             }
         };
-
         // =============================================================================
         // DATA-DRIVEN ASSET COMPILER
         // =============================================================================
 
-        class DataDrivenAssetCompiler {
-        public:
             // Create a data-driven mesh shader asset
-            static bool createDataDrivenTriangle(const std::string& output_path) {
+            bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path) {
                 std::cout << "🚀 Creating data-driven mesh shader triangle..." << std::endl;
 
                 Asset asset;
@@ -1531,16 +1541,17 @@ void main() {
 
                 // Create vertex data with explicit attributes
                 struct Vertex {
-                    float position[3];  // 12 bytes
+                    Vec3Q position;  // 24 bytes
                     float normal[3];    // 12 bytes  
                     float color[4];     // 16 bytes
                     float uv[2];        // 8 bytes
-                }; // Total: 48 bytes
+					float padding[2]; // Padding to align to 16 bytes (total 96 bytes)
+                }; // Total: 96 bytes
 
                 std::vector<Vertex> vertices = {
-                    {{0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.5f, 0.0f}},  // Top - Red
-                    {{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}, // Bottom left - Green
-                    {{0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}   // Bottom right - Blue
+                    {Vec3Q{0, 64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.5f, 0.0f}},  // Top - Red
+                    {Vec3Q{-64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}, // Bottom left - Green
+                    {Vec3Q{64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}   // Bottom right - Blue
                 };
 
                 // Create geometry chunk with mesh shader configuration
@@ -1595,8 +1606,8 @@ void main() {
                 config.attributes = {
                     {VertexAttribute::Float3, 0, 0, "position"},   // offset 0
                     {VertexAttribute::Float3, 12, 1, "normal"},    // offset 12  
-                    {VertexAttribute::Float4, 24, 2, "color"},     // offset 24
-                    {VertexAttribute::Float2, 40, 3, "uv"}         // offset 40
+                    {VertexAttribute::Float3, 24, 2, "color"},     // offset 24
+                    {VertexAttribute::Float2, 48, 3, "uv"}         // offset 40
                 };
 
                 // Generate shaders
@@ -1643,8 +1654,7 @@ void main() {
                 return true;
             }
 
-        private:
-            static bool createDataDrivenShaderChunk(Asset& asset,
+            bool DataDrivenAssetCompiler::createDataDrivenShaderChunk(Asset& asset,
                 const std::vector<uint32_t>& mesh_spirv,
                 const std::vector<uint32_t>& frag_spirv) {
                 using namespace Taffy;
@@ -1701,7 +1711,7 @@ void main() {
                 return true;
             }
 
-            static bool createBasicMaterialChunk(Asset& asset) {
+            bool DataDrivenAssetCompiler::createBasicMaterialChunk(Asset& asset) {
                 MaterialChunk mat_header{};
                 mat_header.material_count = 1;
 
@@ -1724,11 +1734,6 @@ void main() {
                 asset.add_chunk(ChunkType::MTRL, mat_data, "data_driven_material");
                 return true;
             }
-        };
-
-        // =============================================================================
-        // RUNTIME MESH SHADER RENDERER (Conceptual - Engine Integration)
-        // =============================================================================
 
 
     } // namespace Taffy

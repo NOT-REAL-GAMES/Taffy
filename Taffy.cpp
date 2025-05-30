@@ -48,9 +48,9 @@ int main(int argc, char* argv[]) {
 
 	Taffy::Asset ass;
 
-	TaffyAssetCompiler compiler;
+	DataDrivenAssetCompiler compiler;
 
-	compiler.createTriangleAssetSafeDebug(outMaster);
+	compiler.createDataDrivenTriangle(outMaster);
 
 	return createHotPinkVertexOverlay(outOverlay);
 			

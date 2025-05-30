@@ -49,9 +49,9 @@ namespace Taffy {
         // Compile-time hash macro
 #define TAFFY_HASH(str) (Taffy::fnv1a_hash(str))
 
-// =============================================================================
-// Hash Registry - DECLARATION ONLY
-// =============================================================================
+        // =============================================================================
+        // Hash Registry - DECLARATION ONLY
+        // =============================================================================
 
         class HashRegistry {
         public:
@@ -187,8 +187,8 @@ namespace Taffy {
                 MeshShader = 1      // Use mesh shader
             } render_mode;
 
-            uint32_t ms_max_vertices;      // Mesh shader max output vertices
-            uint32_t ms_max_primitives;    // Mesh shader max output primitives
+            uint32_t ms_max_vertices;      // Mesh shader bounds_max output vertices
+            uint32_t ms_max_primitives;    // Mesh shader bounds_max output primitives
             uint32_t ms_workgroup_size[3]; // Mesh shader local work size
 
             enum PrimitiveType : uint32_t {

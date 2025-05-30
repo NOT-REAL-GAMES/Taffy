@@ -73,3 +73,14 @@ namespace tremor::taffy::tools {
     };
 
 }
+
+namespace Taffy {
+    class DataDrivenAssetCompiler {
+    public:
+        static bool createDataDrivenTriangle(const std::string& output_path);
+        static bool createDataDrivenShaderChunk(Asset& asset,
+            const std::vector<uint32_t>& mesh_spirv,
+            const std::vector<uint32_t>& frag_spirv);
+        static bool createBasicMaterialChunk(Asset& asset);
+    };
+}
