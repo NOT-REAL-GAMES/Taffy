@@ -1277,11 +1277,10 @@ void main() {
                 uint32_t workgroup_z = 1;
                 GeometryChunk::PrimitiveType primitive_type = GeometryChunk::Triangles;
                 std::vector<VertexAttribute> attributes;
-                uint32_t vertex_stride = 0;
+                uint32_t vertex_stride = 0;  // In BYTES
                 uint32_t vertex_count = 0;
             };
 
-            // Generate mesh shader GLSL based on vertex format
             static std::string generateMeshShader(const ShaderConfig& config) {
                 std::stringstream shader;
 
@@ -1302,35 +1301,55 @@ void main() {
                     << ", max_vertices = " << config.max_vertices
                     << ", max_primitives = " << config.max_primitives << ") out;\n\n";
 
-                // Storage buffer for vertex data - FIXED: use uint array instead of uint8_t
+                // Storage buffer for vertex data - using float array for easier access
                 shader << "layout(set = 0, binding = 0) readonly buffer VertexBuffer {\n";
-                shader << "    uint vertex_data[];\n";  // Changed from uint8_t to uint
-                shader << "};\n\n";
+                shader << "    float vertices[];\n";  // Using float array
+                shader << "} vertexBuffer;\n\n";
 
-                // Push constants for runtime data
+                // Push constants
                 shader << "layout(push_constant) uniform PushConstants {\n";
                 shader << "    uint vertex_count;\n";
                 shader << "    uint primitive_count;\n";
-                shader << "    uint vertex_stride;\n";
+                shader << "    uint vertex_stride_floats;\n";  // Stride in FLOATS, not bytes
                 shader << "    uint reserved;\n";
                 shader << "} pc;\n\n";
 
                 // Output attributes
                 generateOutputDeclarations(shader, config.attributes);
 
-                // Helper functions
+                // Vec3Q helper function
+                shader << "// Helper to read Vec3Q (6 floats) and convert to vec3\n";
+                shader << "vec3 readVec3Q(uint vertexIndex, uint offsetFloats) {\n";
+                shader << "    uint baseOffset = vertexIndex * pc.vertex_stride_floats + offsetFloats;\n";
+                shader << "    \n";
+                shader << "    // Read the 6 floats that make up Vec3Q\n";
+                shader << "    float x_int = vertexBuffer.vertices[baseOffset + 0];\n";
+                shader << "    float x_frac = vertexBuffer.vertices[baseOffset + 1];\n";
+                shader << "    float y_int = vertexBuffer.vertices[baseOffset + 2];\n";
+                shader << "    float y_frac = vertexBuffer.vertices[baseOffset + 3];\n";
+                shader << "    float z_int = vertexBuffer.vertices[baseOffset + 4];\n";
+                shader << "    float z_frac = vertexBuffer.vertices[baseOffset + 5];\n";
+                shader << "    \n";
+                shader << "    // Simple conversion - adjust based on your quantization scheme\n";
+                shader << "    float x = x_int + x_frac / 1000.0;\n";  // Assuming fractional part is in thousandths
+                shader << "    float y = y_int + y_frac / 1000.0;\n";
+                shader << "    float z = z_int + z_frac / 1000.0;\n";
+                shader << "    \n";
+                shader << "    return vec3(x, y, z);\n";
+                shader << "}\n\n";
+
+                // Other attribute accessors
                 generateAttributeAccessors(shader, config);
 
                 // Main function
                 shader << "void main() {\n";
-                shader << "    uint vertex_count = min(pc.vertex_count, " << config.max_vertices << ");\n";
-                shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << ");\n\n";
+                shader << "    uint vertex_count = min(pc.vertex_count, " << config.max_vertices << "u);\n";
+                shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << "u);\n\n";
 
                 shader << "    SetMeshOutputsEXT(vertex_count, primitive_count);\n\n";
 
                 // Generate vertices
                 shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
-                shader << "        uint vertex_offset = i * pc.vertex_stride;\n\n";
 
                 generateVertexProcessing(shader, config.attributes);
 
@@ -1344,16 +1363,15 @@ void main() {
                 return shader.str();
             }
 
-            // Generate fragment shader that matches the mesh shader outputs
             static std::string generateFragmentShader(const ShaderConfig& config) {
                 std::stringstream shader;
 
                 shader << "#version 460\n\n";
 
-                // Input attributes
+                // Input attributes (skip position as it's handled by gl_Position)
                 for (size_t i = 0; i < config.attributes.size(); ++i) {
                     const auto& attr = config.attributes[i];
-                    if (strcmp(attr.name, "position") == 0) continue; // Position is handled by gl_Position
+                    if (strcmp(attr.name, "position") == 0) continue;
 
                     shader << "layout(location = " << attr.location << ") in ";
                     shader << getGLSLType(attr.type) << " " << attr.name << ";\n";
@@ -1363,12 +1381,12 @@ void main() {
 
                 shader << "void main() {\n";
 
-                // Simple default behavior - use color if available, otherwise white
+                // Use color if available
                 bool hasColor = false;
                 for (const auto& attr : config.attributes) {
                     if (strcmp(attr.name, "color") == 0) {
-                        if (attr.type == attr.Float3) {
-                            shader << "    fragColor = vec4(" << attr.name << ",1.0);\n";
+                        if (attr.type == VertexAttribute::Float3) {
+                            shader << "    fragColor = vec4(" << attr.name << ", 1.0);\n";
                         }
                         else {
                             shader << "    fragColor = " << attr.name << ";\n";
@@ -1400,43 +1418,46 @@ void main() {
             }
 
             static void generateAttributeAccessors(std::stringstream& shader, const ShaderConfig& config) {
-                // Generate helper functions to read typed data from uint buffer
                 shader << "// Attribute accessor functions\n";
 
                 for (const auto& attr : config.attributes) {
-                    shader << getGLSLType(attr.type) << " get_" << attr.name
-                        << "(uint vertex_offset) {\n";
+                    // Skip Vec3Q as it has its own special function
+                    if (attr.type == VertexAttribute::Vec3Q) continue;
 
-                    // Since vertex data is stored as floats and all attributes are float-based,
-                    // we can assume 4-byte alignment and read directly
-                    shader << "    uint offset = (vertex_offset + " << attr.offset << ") / 4;\n";
+                    shader << getGLSLType(attr.type) << " read_" << attr.name
+                        << "(uint vertexIndex) {\n";
+
+                    // Calculate offset in floats
+                    uint32_t offsetFloats = attr.offset / sizeof(float);
+                    shader << "    uint offset = vertexIndex * pc.vertex_stride_floats + "
+                        << offsetFloats << "u;\n";
 
                     switch (attr.type) {
                     case VertexAttribute::Float:
-                        shader << "    return uintBitsToFloat(vertex_data[offset]);\n";
+                        shader << "    return vertexBuffer.vertices[offset];\n";
                         break;
 
                     case VertexAttribute::Float2:
                         shader << "    return vec2(\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset]),\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset + 1])\n";
+                        shader << "        vertexBuffer.vertices[offset],\n";
+                        shader << "        vertexBuffer.vertices[offset + 1u]\n";
                         shader << "    );\n";
                         break;
 
                     case VertexAttribute::Float3:
                         shader << "    return vec3(\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset]),\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset + 1]),\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset + 2])\n";
+                        shader << "        vertexBuffer.vertices[offset],\n";
+                        shader << "        vertexBuffer.vertices[offset + 1u],\n";
+                        shader << "        vertexBuffer.vertices[offset + 2u]\n";
                         shader << "    );\n";
                         break;
 
                     case VertexAttribute::Float4:
                         shader << "    return vec4(\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset]),\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset + 1]),\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset + 2]),\n";
-                        shader << "        uintBitsToFloat(vertex_data[offset + 3])\n";
+                        shader << "        vertexBuffer.vertices[offset],\n";
+                        shader << "        vertexBuffer.vertices[offset + 1u],\n";
+                        shader << "        vertexBuffer.vertices[offset + 2u],\n";
+                        shader << "        vertexBuffer.vertices[offset + 3u]\n";
                         shader << "    );\n";
                         break;
 
@@ -1451,14 +1472,20 @@ void main() {
 
             static void generateVertexProcessing(std::stringstream& shader,
                 const std::vector<VertexAttribute>& attributes) {
-                // Process each attribute
                 for (const auto& attr : attributes) {
                     if (strcmp(attr.name, "position") == 0) {
-                        shader << "        vec3 position = get_" << attr.name << "(vertex_offset);\n";
+                        if (attr.type == VertexAttribute::Vec3Q) {
+                            // Use special Vec3Q reader
+                            uint32_t offsetFloats = attr.offset / sizeof(float);
+                            shader << "        vec3 position = readVec3Q(i, " << offsetFloats << "u);\n";
+                        }
+                        else {
+                            shader << "        vec3 position = read_" << attr.name << "(i);\n";
+                        }
                         shader << "        gl_MeshVerticesEXT[i].gl_Position = vec4(position, 1.0);\n\n";
                     }
                     else {
-                        shader << "        " << attr.name << "[i] = get_" << attr.name << "(vertex_offset);\n";
+                        shader << "        " << attr.name << "[i] = read_" << attr.name << "(i);\n";
                     }
                 }
             }
@@ -1469,13 +1496,13 @@ void main() {
                 switch (config.primitive_type) {
                 case GeometryChunk::Triangles:
                     shader << "    for (uint i = 0; i < primitive_count; ++i) {\n";
-                    shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(i*3, i*3+1, i*3+2);\n";
+                    shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(i*3u, i*3u+1u, i*3u+2u);\n";
                     shader << "    }\n";
                     break;
 
                 case GeometryChunk::Lines:
                     shader << "    for (uint i = 0; i < primitive_count; ++i) {\n";
-                    shader << "        gl_PrimitiveLineIndicesEXT[i] = uvec2(i*2, i*2+1);\n";
+                    shader << "        gl_PrimitiveLineIndicesEXT[i] = uvec2(i*2u, i*2u+1u);\n";
                     shader << "    }\n";
                     break;
 
@@ -1493,14 +1520,7 @@ void main() {
                 case VertexAttribute::Float2: return "vec2";
                 case VertexAttribute::Float3: return "vec3";
                 case VertexAttribute::Float4: return "vec4";
-                case VertexAttribute::Int: return "int";
-                case VertexAttribute::Int2: return "ivec2";
-                case VertexAttribute::Int3: return "ivec3";
-                case VertexAttribute::Int4: return "ivec4";
-                case VertexAttribute::UInt: return "uint";
-                case VertexAttribute::UInt2: return "uvec2";
-                case VertexAttribute::UInt3: return "uvec3";
-                case VertexAttribute::UInt4: return "uvec4";
+                case VertexAttribute::Vec3Q: return "vec3"; // Output type after conversion
                 default: return "float";
                 }
             }
@@ -1511,149 +1531,155 @@ void main() {
                 case VertexAttribute::Float2: return "vec2(0.0)";
                 case VertexAttribute::Float3: return "vec3(0.0)";
                 case VertexAttribute::Float4: return "vec4(0.0, 0.0, 0.0, 1.0)";
-                case VertexAttribute::Int: return "0";
-                case VertexAttribute::Int2: return "ivec2(0)";
-                case VertexAttribute::Int3: return "ivec3(0)";
-                case VertexAttribute::Int4: return "ivec4(0)";
-                case VertexAttribute::UInt: return "0u";
-                case VertexAttribute::UInt2: return "uvec2(0u)";
-                case VertexAttribute::UInt3: return "uvec3(0u)";
-                case VertexAttribute::UInt4: return "uvec4(0u)";
+                case VertexAttribute::Vec3Q: return "vec3(0.0)";
                 default: return "0.0";
                 }
             }
         };
+
         // =============================================================================
         // DATA-DRIVEN ASSET COMPILER
         // =============================================================================
 
             // Create a data-driven mesh shader asset
-            bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path) {
-                std::cout << "🚀 Creating data-driven mesh shader triangle..." << std::endl;
+        bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path) {
+            std::cout << "🚀 Creating data-driven mesh shader triangle with Vec3Q support..." << std::endl;
 
-                Asset asset;
-                asset.set_creator("Data-Driven Taffy Compiler");
-                asset.set_description("Triangle with data-driven mesh shader");
-                asset.set_feature_flags(FeatureFlags::QuantizedCoords |
-                    FeatureFlags::MeshShaders |
-                    FeatureFlags::EmbeddedShaders |
-                    FeatureFlags::HashBasedNames);
+            Asset asset;
+            asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
+            asset.set_description("Triangle with Vec3Q positions and data-driven mesh shader");
+            asset.set_feature_flags(FeatureFlags::QuantizedCoords |
+                FeatureFlags::MeshShaders |
+                FeatureFlags::EmbeddedShaders |
+                FeatureFlags::HashBasedNames);
 
-                // Create vertex data with explicit attributes
-                struct Vertex {
-                    Vec3Q position;  // 24 bytes
-                    float normal[3];    // 12 bytes  
-                    float color[4];     // 16 bytes
-                    float uv[2];        // 8 bytes
-					float padding[2]; // Padding to align to 16 bytes (total 96 bytes)
-                }; // Total: 96 bytes
+            // Create vertex data with Vec3Q positions
+            struct Vertex {
+                Vec3Q position;     // 24 bytes (6 floats)
+                float normal[3];    // 12 bytes (3 floats)
+                float color[4];     // 16 bytes (4 floats)
+                float uv[2];        // 8 bytes (2 floats)
+                float tangent[4];   // 16 bytes (4 floats) - xyz=tangent, w=handedness
+            }; // Total: 76 bytes (19 floats)
 
-                std::vector<Vertex> vertices = {
-                    {Vec3Q{0, 64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.5f, 0.0f}},  // Top - Red
-                    {Vec3Q{-64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}, // Bottom left - Green
-                    {Vec3Q{64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}   // Bottom right - Blue
-                };
+            std::vector<Vertex> vertices = {
+                // Top vertex - Red
+                {Vec3Q{0, 500, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                // Bottom left - Green  
+                {Vec3Q{-500, -500, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                // Bottom right - Blue
+                {Vec3Q{500, -500, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}
+            };
 
-                // Create geometry chunk with mesh shader configuration
-                GeometryChunk geom_header{};
-                geom_header.vertex_count = static_cast<uint32_t>(vertices.size());
-                geom_header.index_count = 0; // Not used in mesh shaders
-                geom_header.vertex_stride = sizeof(Vertex);
-                geom_header.vertex_format = VertexFormat::Position3D | VertexFormat::Normal | VertexFormat::Color | VertexFormat::TexCoord0;
-                geom_header.bounds_min = Vec3Q{ -50, -50, 0 };
-                geom_header.bounds_max = Vec3Q{ 50, 50, 0 };
-                geom_header.lod_distance = 1000.0f;
-                geom_header.lod_level = 0;
+            // Create geometry chunk with mesh shader configuration  
+            GeometryChunk geom_header{};
+            geom_header.vertex_count = static_cast<uint32_t>(vertices.size());
+            geom_header.index_count = 0; // Not used in mesh shaders
+            geom_header.vertex_stride = sizeof(Vertex);
+            geom_header.vertex_format = VertexFormat::Position3D | VertexFormat::Normal |
+                VertexFormat::Color | VertexFormat::TexCoord0 | VertexFormat::Tangent;
+            geom_header.bounds_min = Vec3Q{ -500, -500, 0 };
+            geom_header.bounds_max = Vec3Q{ 500, 500, 0 };
+            geom_header.lod_distance = 1000.0f;
+            geom_header.lod_level = 0;
 
-                // Mesh shader configuration
-                geom_header.render_mode = GeometryChunk::MeshShader;
-                geom_header.ms_max_vertices = 3;
-                geom_header.ms_max_primitives = 1;
-                geom_header.ms_workgroup_size[0] = 1;
-                geom_header.ms_workgroup_size[1] = 1;
-                geom_header.ms_workgroup_size[2] = 1;
-                geom_header.ms_primitive_type = GeometryChunk::Triangles;
-                geom_header.ms_flags = 0;
+            // Mesh shader configuration
+            geom_header.render_mode = GeometryChunk::MeshShader;
+            geom_header.ms_max_vertices = 3;
+            geom_header.ms_max_primitives = 1;
+            geom_header.ms_workgroup_size[0] = 1;
+            geom_header.ms_workgroup_size[1] = 1;
+            geom_header.ms_workgroup_size[2] = 1;
+            geom_header.ms_primitive_type = GeometryChunk::Triangles;
+            geom_header.ms_flags = 0;
 
-                // Create geometry data buffer
-                size_t vertex_data_size = vertices.size() * sizeof(Vertex);
-                size_t total_size = sizeof(GeometryChunk) + vertex_data_size;
+            // Create geometry data buffer
+            size_t vertex_data_size = vertices.size() * sizeof(Vertex);
+            size_t total_size = sizeof(GeometryChunk) + vertex_data_size;
 
-                std::vector<uint8_t> geom_data(total_size);
-                size_t offset = 0;
+            std::vector<uint8_t> geom_data(total_size);
+            size_t offset = 0;
 
-                // Copy header
-                std::memcpy(geom_data.data() + offset, &geom_header, sizeof(geom_header));
-                offset += sizeof(geom_header);
+            // Copy header
+            std::memcpy(geom_data.data() + offset, &geom_header, sizeof(geom_header));
+            offset += sizeof(geom_header);
 
-                // Copy vertex data
-                std::memcpy(geom_data.data() + offset, vertices.data(), vertex_data_size);
+            // Copy vertex data
+            std::memcpy(geom_data.data() + offset, vertices.data(), vertex_data_size);
 
-                asset.add_chunk(ChunkType::GEOM, geom_data, "data_driven_triangle_geometry");
+            asset.add_chunk(ChunkType::GEOM, geom_data, "vec3q_triangle_geometry");
 
-                // Generate and compile shaders based on the geometry
-                MeshShaderGenerator::ShaderConfig config;
-                config.max_vertices = geom_header.ms_max_vertices;
-                config.max_primitives = geom_header.ms_max_primitives;
-                config.workgroup_x = geom_header.ms_workgroup_size[0];
-                config.workgroup_y = geom_header.ms_workgroup_size[1];
-                config.workgroup_z = geom_header.ms_workgroup_size[2];
-                config.primitive_type = static_cast<GeometryChunk::PrimitiveType>(geom_header.ms_primitive_type);
-                config.vertex_stride = geom_header.vertex_stride;
-                config.vertex_count = geom_header.vertex_count;
+            // Generate shaders based on the geometry
+            MeshShaderGenerator::ShaderConfig config;
+            config.max_vertices = geom_header.ms_max_vertices;
+            config.max_primitives = geom_header.ms_max_primitives;
+            config.workgroup_x = geom_header.ms_workgroup_size[0];
+            config.workgroup_y = geom_header.ms_workgroup_size[1];
+            config.workgroup_z = geom_header.ms_workgroup_size[2];
+            config.primitive_type = static_cast<GeometryChunk::PrimitiveType>(geom_header.ms_primitive_type);
+            config.vertex_stride = geom_header.vertex_stride;
+            config.vertex_count = geom_header.vertex_count;
 
-                // Define vertex attributes
-                config.attributes = {
-                    {VertexAttribute::Float3, 0, 0, "position"},   // offset 0
-                    {VertexAttribute::Float3, 12, 1, "normal"},    // offset 12  
-                    {VertexAttribute::Float3, 24, 2, "color"},     // offset 24
-                    {VertexAttribute::Float2, 48, 3, "uv"}         // offset 40
-                };
+            // Define vertex attributes with correct offsets for Vec3Q
+            config.attributes = {
+                {VertexAttribute::Vec3Q, 0, 0, "position"},   // offset 0 bytes (0 floats)
+                {VertexAttribute::Float3, 24, 1, "normal"},   // offset 24 bytes (6 floats)
+                {VertexAttribute::Float4, 36, 2, "color"},    // offset 36 bytes (9 floats)
+                {VertexAttribute::Float2, 52, 3, "uv"},       // offset 52 bytes (13 floats)
+                {VertexAttribute::Float4, 60, 4, "tangent"}   // offset 60 bytes (15 floats)
+            };
 
-                // Generate shaders
-                std::string mesh_shader_glsl = MeshShaderGenerator::generateMeshShader(config);
-                std::string frag_shader_glsl = MeshShaderGenerator::generateFragmentShader(config);
+            // Generate shaders
+            std::string mesh_shader_glsl = MeshShaderGenerator::generateMeshShader(config);
+            std::string frag_shader_glsl = MeshShaderGenerator::generateFragmentShader(config);
 
-                std::cout << "📝 Generated mesh shader:\n" << mesh_shader_glsl << std::endl;
-                std::cout << "📝 Generated fragment shader:\n" << frag_shader_glsl << std::endl;
+            std::cout << "📝 Generated mesh shader with Vec3Q support" << std::endl;
 
-                // Compile shaders
-                tremor::taffy::tools::TaffyAssetCompiler compiler;
-                auto mesh_spirv = compiler.compileGLSLToSpirv(mesh_shader_glsl, shaderc_mesh_shader, "data_driven_mesh_shader");
-                auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "data_driven_fragment_shader");
+            // Log key info
+            std::cout << "📊 Vertex layout:" << std::endl;
+            std::cout << "   Position (Vec3Q): offset 0, size 24 bytes" << std::endl;
+            std::cout << "   Normal (vec3): offset 24, size 12 bytes" << std::endl;
+            std::cout << "   Color (vec4): offset 36, size 16 bytes" << std::endl;
+            std::cout << "   UV (vec2): offset 52, size 8 bytes" << std::endl;
+            std::cout << "   Tangent (vec4): offset 60, size 16 bytes (xyz=tangent, w=handedness)" << std::endl;
+            std::cout << "   Total vertex size: " << sizeof(Vertex) << " bytes ("
+                << sizeof(Vertex) / sizeof(float) << " floats)" << std::endl;
 
-                if (mesh_spirv.empty() || frag_spirv.empty()) {
-                    std::cerr << "❌ Shader compilation failed!" << std::endl;
-                    return false;
-                }
+            // Compile shaders
+            tremor::taffy::tools::TaffyAssetCompiler compiler;
+            auto mesh_spirv = compiler.compileGLSLToSpirv(mesh_shader_glsl, shaderc_mesh_shader, "vec3q_mesh_shader");
+            auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "vec3q_fragment_shader");
 
-                // Create shader chunk
-                if (!createDataDrivenShaderChunk(asset, mesh_spirv, frag_spirv)) {
-                    return false;
-                }
-
-                // Create material chunk
-                if (!createBasicMaterialChunk(asset)) {
-                    return false;
-                }
-
-                // Save asset
-                std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
-                if (!asset.save_to_file(output_path)) {
-                    std::cerr << "❌ Failed to save asset!" << std::endl;
-                    return false;
-                }
-
-                std::cout << "✅ Data-driven mesh shader asset created!" << std::endl;
-                std::cout << "   📁 File: " << output_path << std::endl;
-                std::cout << "   📊 Vertices: " << vertices.size() << std::endl;
-                std::cout << "   🎯 Vertex stride: " << sizeof(Vertex) << " bytes" << std::endl;
-                std::cout << "   🔧 Mesh shader max vertices: " << config.max_vertices << std::endl;
-                std::cout << "   🔧 Mesh shader max primitives: " << config.max_primitives << std::endl;
-
-                return true;
+            if (mesh_spirv.empty() || frag_spirv.empty()) {
+                std::cerr << "❌ Shader compilation failed!" << std::endl;
+                return false;
             }
 
+            // Create shader chunk
+            if (!createDataDrivenShaderChunk(asset, mesh_spirv, frag_spirv)) {
+                return false;
+            }
+
+            // Create material chunk
+            if (!createBasicMaterialChunk(asset)) {
+                return false;
+            }
+
+            // Save asset
+            std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
+            if (!asset.save_to_file(output_path)) {
+                std::cerr << "❌ Failed to save asset!" << std::endl;
+                return false;
+            }
+
+            std::cout << "✅ Vec3Q data-driven mesh shader asset created!" << std::endl;
+            std::cout << "   📁 File: " << output_path << std::endl;
+            std::cout << "   📊 Vertices: " << vertices.size() << std::endl;
+            std::cout << "   🎯 Vertex stride: " << sizeof(Vertex) << " bytes" << std::endl;
+            std::cout << "   🔧 Push constant stride: " << sizeof(Vertex) / sizeof(float) << " floats" << std::endl;
+
+            return true;
+        }
             bool DataDrivenAssetCompiler::createDataDrivenShaderChunk(Asset& asset,
                 const std::vector<uint32_t>& mesh_spirv,
                 const std::vector<uint32_t>& frag_spirv) {

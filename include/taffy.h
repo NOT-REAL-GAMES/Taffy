@@ -215,7 +215,8 @@ namespace Taffy {
                 UInt = 8,
                 UInt2 = 9,
                 UInt3 = 10,
-                UInt4 = 11
+                UInt4 = 11,
+                Vec3Q = 12
             };
 
             Type type;
