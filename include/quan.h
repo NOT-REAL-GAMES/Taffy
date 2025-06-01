@@ -2,6 +2,9 @@
 
 #include <glm/glm.hpp>
 
+
+#pragma pack(push, 1)
+
 struct alignas(16) Vec3Q {
     alignas(16) int64_t x, y, z;
 
@@ -56,3 +59,5 @@ struct alignas(16) Vec3Q {
         return !(*this == other);
     }
 };
+
+#pragma pack(pop)

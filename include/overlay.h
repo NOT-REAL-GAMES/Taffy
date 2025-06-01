@@ -245,10 +245,16 @@ namespace Taffy {
                 targets_.size() * sizeof(TargetAsset) -
                 operations_.size() * sizeof(OverlayOperation);
 
+            std::cout << "    📊 Calculated operation data size: " << data_size << " bytes" << std::endl;
+            std::cout << "    📊 Header size: " << sizeof(OverlayHeader) << " bytes" << std::endl;
+            std::cout << "    📊 Target size: " << sizeof(TargetAsset) << " bytes" << std::endl;
+            std::cout << "    📊 Operation size: " << sizeof(OverlayOperation) << " bytes" << std::endl;
+
             operation_data_.clear();
             operation_data_.resize(data_size);
             if (data_size > 0) {
                 file.read(reinterpret_cast<char*>(operation_data_.data()), data_size);
+                std::cout << "    ✅ Read " << data_size << " bytes of operation data" << std::endl;
             }
 
             file.close();
@@ -351,8 +357,12 @@ namespace Taffy {
             }
 
             // Get new color from operation data
+            std::cout << "    📊 Operation data size: " << op.data_size << " bytes" << std::endl;
+            std::cout << "    📊 Operation data offset: " << op.data_offset << std::endl;
+            std::cout << "    📊 Total operation data available: " << operation_data_.size() << " bytes" << std::endl;
+            
             if (op.data_size < 4 * sizeof(float)) {
-                std::cerr << "    ❌ Insufficient color data!" << std::endl;
+                std::cerr << "    ❌ Insufficient color data! Expected " << (4 * sizeof(float)) << " bytes, got " << op.data_size << std::endl;
                 return false;
             }
 
@@ -367,22 +377,26 @@ namespace Taffy {
             size_t target_vertex_offset = vertex_data_offset + (op.target_hash * geom_header.vertex_stride);
 
             // Calculate color offset based on vertex format
-            // For data-driven assets with standard layout:
-            // - position: 12 bytes (3 floats) 
-            // - normal: 12 bytes (3 floats)
-            // - color: 16 bytes (4 floats) <- This is what we want
-            // - uv: 8 bytes (2 floats)
-            // - padding: variable
-
-            size_t color_offset_in_vertex = 24; // position(12) + normal(12)
-
-            // If using quantized positions, adjust offset
-            if ((uint32_t)(geom_header.vertex_format & VertexFormat::Position3D) > 0) {
-                // Check if this is likely quantized (stride is large)
-                if (geom_header.vertex_stride >= 96) {
-                    // Likely using Vec3Q for position (24 bytes instead of 12)
-                    color_offset_in_vertex = 36; // Vec3Q(24) + normal(12)
-                }
+            // Check if asset uses quantized coordinates
+            bool uses_quantized = asset.has_feature(FeatureFlags::QuantizedCoords);
+            
+            size_t color_offset_in_vertex;
+            if (uses_quantized) {
+                // MeshVertex layout with Vec3Q:
+                // - position: 24 bytes (Vec3Q - 3x int64_t) 
+                // - normal: 12 bytes (3 floats)
+                // - color: 16 bytes (4 floats) <- This is what we want
+                // - texCoord: 8 bytes (2 floats)
+                // - padding: 8 bytes (2 floats)
+                color_offset_in_vertex = 36; // Vec3Q(24) + normal(12)
+                std::cout << "    ✅ Using Vec3Q position format (24 bytes)" << std::endl;
+            } else {
+                // Standard float positions:
+                // - position: 12 bytes (3 floats)
+                // - normal: 12 bytes (3 floats)
+                // - color: 16 bytes (4 floats)
+                color_offset_in_vertex = 24; // position(12) + normal(12)
+                std::cout << "    ✅ Using float position format (12 bytes)" << std::endl;
             }
 
             size_t absolute_color_offset = target_vertex_offset + color_offset_in_vertex;
@@ -796,8 +810,12 @@ namespace Taffy {
             }
 
             // Get new color from operation data
+            std::cout << "    📊 Operation data size: " << op.data_size << " bytes" << std::endl;
+            std::cout << "    📊 Operation data offset: " << op.data_offset << std::endl;
+            std::cout << "    📊 Total operation data available: " << operation_data_.size() << " bytes" << std::endl;
+            
             if (op.data_size < 4 * sizeof(float)) {
-                std::cerr << "    ❌ Insufficient color data!" << std::endl;
+                std::cerr << "    ❌ Insufficient color data! Expected " << (4 * sizeof(float)) << " bytes, got " << op.data_size << std::endl;
                 return false;
             }
 
@@ -812,22 +830,26 @@ namespace Taffy {
             size_t target_vertex_offset = vertex_data_offset + (op.target_hash * geom_header.vertex_stride);
 
             // Calculate color offset based on vertex format
-            // For data-driven assets with standard layout:
-            // - position: 12 bytes (3 floats) 
-            // - normal: 12 bytes (3 floats)
-            // - color: 16 bytes (4 floats) <- This is what we want
-            // - uv: 8 bytes (2 floats)
-            // - padding: variable
-
-            size_t color_offset_in_vertex = 24; // position(12) + normal(12)
-
-            // If using quantized positions, adjust offset
-            if ((uint32_t)(geom_header.vertex_format & VertexFormat::Position3D) > 0) {
-                // Check if this is likely quantized (stride is large)
-                if (geom_header.vertex_stride >= 96) {
-                    // Likely using Vec3Q for position (24 bytes instead of 12)
-                    color_offset_in_vertex = 36; // Vec3Q(24) + normal(12)
-                }
+            // Check if asset uses quantized coordinates
+            bool uses_quantized = asset.has_feature(FeatureFlags::QuantizedCoords);
+            
+            size_t color_offset_in_vertex;
+            if (uses_quantized) {
+                // MeshVertex layout with Vec3Q:
+                // - position: 24 bytes (Vec3Q - 3x int64_t) 
+                // - normal: 12 bytes (3 floats)
+                // - color: 16 bytes (4 floats) <- This is what we want
+                // - texCoord: 8 bytes (2 floats)
+                // - padding: 8 bytes (2 floats)
+                color_offset_in_vertex = 36; // Vec3Q(24) + normal(12)
+                std::cout << "    ✅ Using Vec3Q position format (24 bytes)" << std::endl;
+            } else {
+                // Standard float positions:
+                // - position: 12 bytes (3 floats)
+                // - normal: 12 bytes (3 floats)
+                // - color: 16 bytes (4 floats)
+                color_offset_in_vertex = 24; // position(12) + normal(12)
+                std::cout << "    ✅ Using float position format (12 bytes)" << std::endl;
             }
 
             size_t absolute_color_offset = target_vertex_offset + color_offset_in_vertex;
@@ -1006,5 +1028,6 @@ namespace Taffy {
             }
         }
     };
+
 
 } // namespace Taffy

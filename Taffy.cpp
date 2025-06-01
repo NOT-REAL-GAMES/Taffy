@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
 
 	Taffy::Asset ass;
 
-	DataDrivenAssetCompiler compiler;
+	DataDrivenAssetCompiler compiler{};
 
 	compiler.createDataDrivenTriangle(outMaster);
 

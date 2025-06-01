@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include "taffy.h"
-#include "asset.h"
 
 namespace Taffy {
 
@@ -185,6 +184,11 @@ namespace Taffy {
         std::cout << "    Description: " << header_.description << std::endl;
         std::cout << "    Chunks: " << header_.chunk_count << std::endl;
 
+        // Debug: Show current file position
+        std::cout << "  📍 File position before chunk directory: " << file.tellg() << std::endl;
+        std::cout << "  📐 sizeof(AssetHeader): " << sizeof(AssetHeader) << std::endl;
+        std::cout << "  📐 sizeof(ChunkDirectoryEntry): " << sizeof(ChunkDirectoryEntry) << std::endl;
+        
         // Read chunk directory
         chunk_directory_.clear();
         chunk_directory_.resize(header_.chunk_count);
@@ -195,17 +199,73 @@ namespace Taffy {
                 std::cerr << "❌ Failed to read chunk directory entry " << i << std::endl;
                 return false;
             }
+            
+            // Debug: Print what we just read
+            const auto& entry = chunk_directory_[i];
+            std::cout << "  📄 Chunk " << i << ": type=0x" << std::hex << static_cast<uint32_t>(entry.type) 
+                      << std::dec << ", offset=" << entry.offset 
+                      << ", size=" << entry.size 
+                      << ", name='" << entry.name << "'" << std::endl;
         }
 
+        // Get file size for validation
+        file.seekg(0, std::ios::end);
+        size_t file_size = file.tellg();
+        file.seekg(sizeof(AssetHeader) + chunk_directory_.size() * sizeof(ChunkDirectoryEntry));
+        
+        std::cout << "  📊 File size: " << file_size << " bytes" << std::endl;
+        std::cout << "  📊 Expected total size from header: " << header_.total_size << " bytes" << std::endl;
+        
+        if (file_size != header_.total_size) {
+            std::cerr << "  ⚠️  WARNING: File size mismatch! File might be truncated." << std::endl;
+        }
+        
         // Read chunk data
         chunk_data_.clear();
         for (const auto& entry : chunk_directory_) {
+            // Debug output
+            std::cout << "  📦 Reading chunk: " << entry.name 
+                      << " (type: 0x" << std::hex << static_cast<uint32_t>(entry.type) << std::dec
+                      << ", offset: " << entry.offset 
+                      << ", size: " << entry.size << ")" << std::endl;
+            
+            // Validate chunk bounds
+            if (entry.offset + entry.size > file_size) {
+                std::cerr << "❌ Chunk extends beyond file! Offset: " << entry.offset 
+                          << ", Size: " << entry.size 
+                          << ", File size: " << file_size << std::endl;
+                return false;
+            }
+            
+            file.clear(); // Clear any error flags before seeking
             file.seekg(entry.offset);
+            if (!file.good()) {
+                std::cerr << "❌ Failed to seek to offset " << entry.offset << " for chunk: " << entry.name << std::endl;
+                std::cerr << "   File state: " << (file.eof() ? "EOF" : "not EOF") 
+                          << ", " << (file.fail() ? "FAIL" : "not FAIL")
+                          << ", " << (file.bad() ? "BAD" : "not BAD") << std::endl;
+                return false;
+            }
 
             std::vector<uint8_t> data(entry.size);
             file.read(reinterpret_cast<char*>(data.data()), entry.size);
-            if (!file.good()) {
+            
+            // Check if we read the expected amount of data
+            size_t bytes_read = file.gcount();
+            if (bytes_read != entry.size) {
                 std::cerr << "❌ Failed to read chunk data for: " << entry.name << std::endl;
+                std::cerr << "   Attempted to read " << entry.size << " bytes at offset " << entry.offset << std::endl;
+                std::cerr << "   Actually read: " << bytes_read << " bytes" << std::endl;
+                std::cerr << "   File state: " << (file.eof() ? "EOF" : "not EOF") 
+                          << ", " << (file.fail() ? "FAIL" : "not FAIL")
+                          << ", " << (file.bad() ? "BAD" : "not BAD") << std::endl;
+                
+                // If we read partial data, show what checksum we got
+                if (bytes_read > 0) {
+                    uint32_t partial_crc = calculate_crc32(data.data(), bytes_read);
+                    std::cerr << "   Partial data CRC: 0x" << std::hex << partial_crc << std::dec << std::endl;
+                    std::cerr << "   Expected CRC: 0x" << std::hex << entry.checksum << std::dec << std::endl;
+                }
                 return false;
             }
 

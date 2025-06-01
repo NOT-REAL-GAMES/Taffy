@@ -69,9 +69,9 @@ namespace tremor::taffy::tools {
     overlay.add_target_asset("assets/tri.taf", "^1.0.0");  // Target the new format
     
     // Change vertex 1 (the green one) to hot pink
-    overlay.add_vertex_color_change(0, 1.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
-    overlay.add_vertex_color_change(1, 1.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
-    overlay.add_vertex_color_change(2, 1.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(0, 1.0f, 0.0f, 0.4125f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(1, 1.0f, 0.0f, 0.0f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(2, 1.0f, 0.0f, 0.0f, 1.0f);  // Hot pink color!
     
     std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
     
@@ -1075,9 +1075,9 @@ void main() {
             };
 
             std::vector<OverlayVertex> vertices = {
-                {Vec3Q{0, 50, 0}, {0,0,1}, {0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{-50, -50, 0}, {0,0,1}, {0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-                {Vec3Q{50, -50, 0}, {0,0,1}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}
+                {Vec3Q{0, 50, 0}, {0,0,1}, {0.5f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},  // Yellow
+                {Vec3Q{-50, -50, 0}, {0,0,1}, {0.0f, 1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}},  // Magenta
+                {Vec3Q{50, -50, 0}, {0,0,1}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}  // Red
             };
 
             std::vector<uint32_t> indices = { 0, 1, 2 };
@@ -1303,11 +1303,12 @@ void main() {
 
                 // Storage buffer for vertex data - using float array for easier access
                 shader << "layout(set = 0, binding = 0) readonly buffer VertexBuffer {\n";
-                shader << "    float vertices[];\n";  // Using float array
+                shader << "    uint vertices[];\n";  // Using uint array to read raw data
                 shader << "} vertexBuffer;\n\n";
 
                 // Push constants
                 shader << "layout(push_constant) uniform PushConstants {\n";
+                shader << "    mat4 mvp;\n";  // Model-View-Projection matrix
                 shader << "    uint vertex_count;\n";
                 shader << "    uint primitive_count;\n";
                 shader << "    uint vertex_stride_floats;\n";  // Stride in FLOATS, not bytes
@@ -1318,24 +1319,28 @@ void main() {
                 generateOutputDeclarations(shader, config.attributes);
 
                 // Vec3Q helper function
-                shader << "// Helper to read Vec3Q (6 floats) and convert to vec3\n";
-                shader << "vec3 readVec3Q(uint vertexIndex, uint offsetFloats) {\n";
-                shader << "    uint baseOffset = vertexIndex * pc.vertex_stride_floats + offsetFloats;\n";
+                shader << "// Helper to read Vec3Q (3 x int64) and convert to vec3\n";
+                shader << "vec3 readVec3Q(uint vertexIndex, uint offsetBytes) {\n";
+                shader << "    // Calculate offset in uint units (4 bytes each)\n";
+                shader << "    uint baseOffsetUints = (vertexIndex * pc.vertex_stride_floats * 4 + offsetBytes) / 4;\n";
                 shader << "    \n";
-                shader << "    // Read the 6 floats that make up Vec3Q\n";
-                shader << "    float x_int = vertexBuffer.vertices[baseOffset + 0];\n";
-                shader << "    float x_frac = vertexBuffer.vertices[baseOffset + 1];\n";
-                shader << "    float y_int = vertexBuffer.vertices[baseOffset + 2];\n";
-                shader << "    float y_frac = vertexBuffer.vertices[baseOffset + 3];\n";
-                shader << "    float z_int = vertexBuffer.vertices[baseOffset + 4];\n";
-                shader << "    float z_frac = vertexBuffer.vertices[baseOffset + 5];\n";
+                shader << "    // Read Vec3Q as pairs of uint32 (since GLSL doesn't have int64)\n";
+                shader << "    // Each int64 is stored as two consecutive uint32s (little-endian)\n";
+                shader << "    uint x_lo = vertexBuffer.vertices[baseOffsetUints + 0];\n";
+                shader << "    uint x_hi = vertexBuffer.vertices[baseOffsetUints + 1];\n";
+                shader << "    uint y_lo = vertexBuffer.vertices[baseOffsetUints + 2];\n";
+                shader << "    uint y_hi = vertexBuffer.vertices[baseOffsetUints + 3];\n";
+                shader << "    uint z_lo = vertexBuffer.vertices[baseOffsetUints + 4];\n";
+                shader << "    uint z_hi = vertexBuffer.vertices[baseOffsetUints + 5];\n";
                 shader << "    \n";
-                shader << "    // Simple conversion - adjust based on your quantization scheme\n";
-                shader << "    float x = x_int + x_frac / 1000.0;\n";  // Assuming fractional part is in thousandths
-                shader << "    float y = y_int + y_frac / 1000.0;\n";
-                shader << "    float z = z_int + z_frac / 1000.0;\n";
+                shader << "    // Reconstruct int64 values and convert to float\n";
+                shader << "    // Note: This assumes the values fit in float range\n";
+                shader << "    float x = float(int(x_lo)) + float(int(x_hi)) * 4294967296.0;\n";
+                shader << "    float y = float(int(y_lo)) + float(int(y_hi)) * 4294967296.0;\n";
+                shader << "    float z = float(int(z_lo)) + float(int(z_hi)) * 4294967296.0;\n";
                 shader << "    \n";
-                shader << "    return vec3(x, y, z);\n";
+                shader << "    // Convert from quantized units (1/128mm) to world units\n";
+                shader << "    return vec3(x / 128000.0, y / 128000.0, z / 128000.0);\n";
                 shader << "}\n\n";
 
                 // Other attribute accessors
@@ -1475,14 +1480,13 @@ void main() {
                 for (const auto& attr : attributes) {
                     if (strcmp(attr.name, "position") == 0) {
                         if (attr.type == VertexAttribute::Vec3Q) {
-                            // Use special Vec3Q reader
-                            uint32_t offsetFloats = attr.offset / sizeof(float);
-                            shader << "        vec3 position = readVec3Q(i, " << offsetFloats << "u);\n";
+                            // Use special Vec3Q reader - pass offset in bytes
+                            shader << "        vec3 position = readVec3Q(i, " << attr.offset << "u);\n";
                         }
                         else {
                             shader << "        vec3 position = read_" << attr.name << "(i);\n";
                         }
-                        shader << "        gl_MeshVerticesEXT[i].gl_Position = vec4(position, 1.0);\n\n";
+                        shader << "        gl_MeshVerticesEXT[i].gl_Position = pc.mvp * vec4(position, 1.0);\n\n";
                     }
                     else {
                         shader << "        " << attr.name << "[i] = read_" << attr.name << "(i);\n";
@@ -1563,12 +1567,12 @@ void main() {
             }; // Total: 76 bytes (19 floats)
 
             std::vector<Vertex> vertices = {
-                // Top vertex - Red
-                {Vec3Q{0, 500, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                // Bottom left - Green  
-                {Vec3Q{-500, -500, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                // Bottom right - Blue
-                {Vec3Q{500, -500, 0}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}
+                // Top vertex - Yellow
+                {Vec3Q{0, 64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                // Bottom left - Magenta  
+                {Vec3Q{-64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                // Bottom right - Red
+                {Vec3Q{64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}
             };
 
             // Create geometry chunk with mesh shader configuration  

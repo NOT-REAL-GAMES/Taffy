@@ -280,6 +280,12 @@ namespace Taffy {
         // ASSET HEADER STRUCTURE
         // =============================================================================
 #pragma pack(push, 1)  // Force byte alignment to prevent padding issues
+        
+        // Non-aligned version of Vec3Q for file I/O
+        struct Vec3Q_Packed {
+            int64_t x, y, z;
+        };
+        
         struct AssetHeader {
             char magic[4];              // "TAF!" for master assets, "TAFO" for overlays
             uint32_t version_major;
@@ -291,8 +297,8 @@ namespace Taffy {
             uint32_t dependency_count;
             uint32_t ai_model_count;
             uint64_t total_size;
-            Vec3Q world_bounds_min;     // Quantized world bounds
-            Vec3Q world_bounds_max;
+            Vec3Q_Packed world_bounds_min;     // Quantized world bounds (packed version)
+            Vec3Q_Packed world_bounds_max;
             uint64_t created_timestamp;
             char creator[64];           // Creator/tool name
             char description[128];      // Asset description
