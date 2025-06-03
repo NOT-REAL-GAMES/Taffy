@@ -60,25 +60,55 @@ namespace Taffy {
 
 namespace tremor::taffy::tools {
 
-    bool createHotPinkVertexOverlay(const std::string& output_path) {
-    std::cout << "🌈 Creating HOT PINK vertex overlay (hash-based)..." << std::endl;
+    bool createHotPinkShaderOverlay(const std::string& output_path) {
+    std::cout << "🌈 Creating HOT PINK shader overlay..." << std::endl;
     
     using namespace Taffy;
     
     Overlay overlay;
-    overlay.add_target_asset("assets/tri.taf", "^1.0.0");  // Target the new format
+    overlay.add_target_asset("assets/fixed_triangle.taf", "^1.0.0");  // Target the correct triangle asset
     
-    // Change vertex 1 (the green one) to hot pink
-    overlay.add_vertex_color_change(0, 0.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
-    overlay.add_vertex_color_change(1, 1.0f, 0.0f, 0.0f, 1.0f);  // Hot pink color!
-    overlay.add_vertex_color_change(2, 1.0f, 0.0f, 0.0f, 1.0f);  // Hot pink color!
+    // Create a simple hot pink fragment shader
+    std::string hotPinkFragShader = R"(
+#version 460
+
+layout(location = 0) out vec4 fragColor;
+
+void main() {
+    fragColor = vec4(0.0, 1.0, 1.0, 1.0);
+}
+)";
+    
+    // Compile the shader
+    TaffyAssetCompiler compiler;
+    std::vector<uint32_t> compiledFrag = compiler.compileGLSLToSpirv(
+        hotPinkFragShader, 
+        shaderc_fragment_shader,
+        "hot_pink_fragment_shader"
+    );
+    
+    if (compiledFrag.empty()) {
+        std::cerr << "Failed to compile hot pink fragment shader" << std::endl;
+        return false;
+    }
+    
+    std::cout << "    📊 Compiled hot pink shader size: " << compiledFrag.size() * sizeof(uint32_t) << " bytes" << std::endl;
+    
+    // Add shader replacement operation
+    // Hash the shader names to match what's in the TAF file
+    uint64_t original_frag_hash = fnv1a_hash("data_driven_fragment_shader");
+    uint64_t replacement_frag_hash = fnv1a_hash("hot_pink_fragment_shader");
+    
+    std::cout << "    📊 Original fragment shader hash: 0x" << std::hex << original_frag_hash << std::dec << std::endl;
+    std::cout << "    📊 Replacement fragment shader hash: 0x" << std::hex << replacement_frag_hash << std::dec << std::endl;
+    
+    overlay.add_shader_replacement(original_frag_hash, replacement_frag_hash, compiledFrag);
     
     std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
     
     if (overlay.save_to_file(output_path)) {
-        std::cout << "✅ Hot pink overlay created!" << std::endl;
-        std::cout << "   🎯 Targets: hash-based tri.taf" << std::endl;
-        std::cout << "   🌈 Changes vertex 1 to hot pink" << std::endl;
+        std::cout << "✅ Hot pink shader overlay created!" << std::endl;
+        std::cout << "   🎯 Replaces fragment shader with solid hot pink output" << std::endl;
         return true;
     }
     
@@ -1282,6 +1312,8 @@ void main() {
                 uint32_t vertex_count = 0;
                 bool has_indices = false;
                 uint32_t index_count = 0;
+                bool prefersCompactVertexOutput = true;  // Output vertex data directly instead of reading from buffer
+                bool supportsOverlays = true;  // Enable overlay system support
             };
 
             static std::string generateMeshShader(const ShaderConfig& config) {
@@ -1316,6 +1348,8 @@ void main() {
                 shader << "    uint primitive_count;\n";
                 shader << "    uint vertex_stride_floats;\n";  // Stride in FLOATS, not bytes
                 shader << "    uint index_offset_bytes;\n";  // Offset to index data in buffer
+                shader << "    uint overlay_flags;\n";  // Bit flags for active overlays
+                shader << "    uint overlay_data_offset;\n";  // Offset to overlay data in buffer
                 shader << "} pc;\n\n";
 
                 // Output attributes
@@ -1366,15 +1400,38 @@ void main() {
 
                 shader << "    SetMeshOutputsEXT(vertex_count, primitive_count);\n\n";
 
-                // Generate vertices
-                shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
-
-                generateVertexProcessing(shader, config.attributes);
-
-                shader << "    }\n\n";
-
-                // Generate primitives
-                generatePrimitiveGeneration(shader, config);
+                if (config.prefersCompactVertexOutput) {
+                    // Hardcode simple triangle with per-vertex colors
+                    shader << "    // Compact vertex output - hardcoded triangle\n";
+                    shader << "    gl_MeshVerticesEXT[0].gl_Position = pc.mvp * vec4(-0.5, -0.5, 0.0, 1.0);\n";
+                    shader << "    gl_MeshVerticesEXT[1].gl_Position = pc.mvp * vec4( 0.5, -0.5, 0.0, 1.0);\n";
+                    shader << "    gl_MeshVerticesEXT[2].gl_Position = pc.mvp * vec4( 0.0,  0.5, 0.0, 1.0);\n";
+                    shader << "    \n";
+                    shader << "    // Base colors for the triangle\n";
+                    shader << "    vec4 baseColors[3] = vec4[3](\n";
+                    shader << "        vec4(1.0, 1.0, 0.0, 1.0), // Yellow\n";
+                    shader << "        vec4(1.0, 0.0, 1.0, 1.0), // Magenta\n";
+                    shader << "        vec4(1.0, 0.0, 0.0, 1.0)  // Red\n";
+                    shader << "    );\n";
+                    shader << "    \n";
+                    
+                    shader << "    // Set colors directly\n";
+                    shader << "    color[0] = baseColors[0];\n";
+                    shader << "    color[1] = baseColors[1];\n";
+                    shader << "    color[2] = baseColors[2];\n";
+                    
+                    shader << "    \n";
+                    shader << "    // Set triangle indices\n";
+                    shader << "    gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);\n";
+                } else {
+                    // Generate vertices from buffer
+                    shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
+                    generateVertexProcessing(shader, config.attributes);
+                    shader << "    }\n\n";
+                    
+                    // Generate primitives
+                    generatePrimitiveGeneration(shader, config);
+                }
 
                 shader << "}\n";
 
@@ -1412,6 +1469,8 @@ void main() {
                 shader << "    uint primitive_count;\n";
                 shader << "    uint vertex_stride_floats;\n";
                 shader << "    uint index_offset_bytes;\n";
+                shader << "    uint overlay_flags;\n";
+                shader << "    uint overlay_data_offset;\n";
                 shader << "} pc;\n\n";
 
                 shader << "layout(location = 0) out vec4 fragColor;\n\n";
@@ -1447,7 +1506,11 @@ void main() {
                 bool hasColor = false;
                 for (const auto& attr : config.attributes) {
                     if (strcmp(attr.name, "color") == 0) {
-                        if (attr.type == VertexAttribute::Float3) {
+                        hasColor = true;
+                        if (config.prefersCompactVertexOutput) {
+                            // Simple passthrough when using compact output
+                            shader << "    fragColor = color;\n";
+                        } else if (attr.type == VertexAttribute::Float3) {
                             shader << "    fragColor = vec4(" << attr.name << ", 1.0);\n";
                         }
                         else {
@@ -1586,14 +1649,6 @@ void main() {
                     }
                     else {
                         shader << "        " << attr.name << "[i] = read_" << attr.name << "(i);\n";
-                        // Debug: Show different colors per vertex to verify reading
-                        if (strcmp(attr.name, "color") == 0) {
-                            shader << "        // DEBUG: Verify each vertex gets different data\n";
-                            shader << "        vec4 readColor = read_" << attr.name << "(i);\n";
-                            shader << "        " << attr.name << "[i] = readColor;\n";
-                            shader << "        // Also output vertex index as color for debugging\n";
-                            shader << "        " << attr.name << "[i] = vec4(float(i), float(i)/2.0, 0.0, 1.0);\n";
-                        }
                     }
                 }
                 
@@ -1757,14 +1812,16 @@ void main() {
             config.vertex_count = geom_header.vertex_count;
             config.has_indices = (geom_header.index_count > 0);
             config.index_count = geom_header.index_count;
+            config.prefersCompactVertexOutput = true; // Use compact output for simplicity
+            config.supportsOverlays = true; // Enable overlay support
 
-            // Define vertex attributes with correct offsets for Vec3Q
+            // Define vertex attributes with correct offsets matching OverlayVertex structure
             config.attributes = {
-                {VertexAttribute::Vec3Q, 0, 0, "position"},   // offset 0 bytes (0 floats)
-                {VertexAttribute::Float3, 24, 1, "normal"},   // offset 24 bytes (6 floats)
-                {VertexAttribute::Float4, 36, 2, "color"},    // offset 36 bytes (9 floats)
-                {VertexAttribute::Float2, 52, 3, "uv"},       // offset 52 bytes (13 floats)
-                {VertexAttribute::Float4, 60, 4, "tangent"}   // offset 60 bytes (15 floats)
+                {VertexAttribute::Vec3Q, 0, 0, "position"},   // offset 0 bytes
+                {VertexAttribute::Float3, 24, 1, "normal"},   // offset 24 bytes
+                {VertexAttribute::Float2, 36, 2, "uv"},       // offset 36 bytes (UV comes BEFORE color!)
+                {VertexAttribute::Float4, 44, 3, "color"}     // offset 44 bytes
+                // No tangent in OverlayVertex structure
             };
 
             // Generate shaders

@@ -320,12 +320,131 @@ namespace Taffy {
             std::cout << "    Target hash: 0x" << std::hex << op.target_hash << std::dec << std::endl;
             std::cout << "    Replacement hash: 0x" << std::hex << op.replacement_hash << std::dec << std::endl;
 
-            // TODO: Implement shader replacement logic
-            // This would involve:
-            // 1. Finding the shader chunk
-            // 2. Locating the shader with target_hash
-            // 3. Replacing its SPIR-V with the operation data
+            // Get the shader chunk
+            auto shader_data = asset.get_chunk_data(ChunkType::SHDR);
+            if (!shader_data) {
+                std::cerr << "    ❌ No shader chunk found!" << std::endl;
+                return false;
+            }
 
+            // Parse shader chunk header
+            const uint8_t* chunk_ptr = shader_data->data();
+            ShaderChunk shader_header;
+            std::memcpy(&shader_header, chunk_ptr, sizeof(shader_header));
+            
+            std::cout << "    📊 Shader chunk contains " << shader_header.shader_count << " shaders" << std::endl;
+
+            // Create a mutable copy of shader data
+            std::vector<uint8_t> modified_shader_data = *shader_data;
+            uint8_t* mod_ptr = modified_shader_data.data();
+            
+            // Skip header
+            size_t offset = sizeof(ShaderChunk);
+            
+            // Search for the shader with matching hash
+            bool found = false;
+            for (uint32_t i = 0; i < shader_header.shader_count; ++i) {
+                ShaderChunk::Shader* shader_info = reinterpret_cast<ShaderChunk::Shader*>(mod_ptr + offset);
+                
+                std::cout << "    🔍 Checking shader " << i << " with hash 0x" 
+                         << std::hex << shader_info->name_hash << std::dec << std::endl;
+                
+                if (shader_info->name_hash == op.target_hash) {
+                    std::cout << "    ✅ Found target shader!" << std::endl;
+                    found = true;
+                    
+                    // Save old size before updating
+                    size_t old_shader_size = shader_info->spirv_size;
+                    size_t new_shader_size = op.data_size;
+                    
+                    // Update shader info
+                    std::cout << "    📝 Updating shader hash from 0x" << std::hex << shader_info->name_hash 
+                             << " to 0x" << op.replacement_hash << std::dec << std::endl;
+                    shader_info->name_hash = op.replacement_hash;
+                    shader_info->spirv_size = static_cast<uint32_t>(op.data_size);
+                    
+                    // Calculate where this shader's SPIR-V data is stored
+                    size_t spirv_offset = sizeof(ShaderChunk) + (shader_header.shader_count * sizeof(ShaderChunk::Shader));
+                    
+                    // Skip to this shader's SPIR-V data (using OLD sizes for existing shaders)
+                    for (uint32_t j = 0; j < i; ++j) {
+                        ShaderChunk::Shader* prev_shader = reinterpret_cast<ShaderChunk::Shader*>(
+                            mod_ptr + sizeof(ShaderChunk) + j * sizeof(ShaderChunk::Shader));
+                        spirv_offset += prev_shader->spirv_size;
+                    }
+                    
+                    if (new_shader_size != old_shader_size) {
+                        // This is more complex - we'd need to shift data around
+                        // For now, we'll only support same-size replacements
+                        std::cerr << "    ⚠️ Size mismatch not yet supported (old: " << old_shader_size 
+                                 << ", new: " << new_shader_size << ")" << std::endl;
+                        
+                        // For simplicity, let's rebuild the entire chunk
+                        std::vector<uint8_t> new_shader_data;
+                        
+                        // Copy header
+                        new_shader_data.insert(new_shader_data.end(), 
+                            modified_shader_data.begin(), 
+                            modified_shader_data.begin() + sizeof(ShaderChunk));
+                        
+                        // Copy shader infos (with our modification)
+                        new_shader_data.insert(new_shader_data.end(),
+                            modified_shader_data.begin() + sizeof(ShaderChunk),
+                            modified_shader_data.begin() + sizeof(ShaderChunk) + shader_header.shader_count * sizeof(ShaderChunk::Shader));
+                        
+                        // Now copy SPIR-V data, replacing the target shader
+                        size_t current_spirv_offset = sizeof(ShaderChunk) + shader_header.shader_count * sizeof(ShaderChunk::Shader);
+                        
+                        for (uint32_t j = 0; j < shader_header.shader_count; ++j) {
+                            ShaderChunk::Shader* shader = reinterpret_cast<ShaderChunk::Shader*>(
+                                modified_shader_data.data() + sizeof(ShaderChunk) + j * sizeof(ShaderChunk::Shader));
+                            
+                            if (j == i) {
+                                // This is our target shader - use replacement data
+                                new_shader_data.insert(new_shader_data.end(),
+                                    operation_data_.begin() + op.data_offset,
+                                    operation_data_.begin() + op.data_offset + op.data_size);
+                            } else {
+                                // Copy original shader data
+                                new_shader_data.insert(new_shader_data.end(),
+                                    modified_shader_data.begin() + current_spirv_offset,
+                                    modified_shader_data.begin() + current_spirv_offset + shader->spirv_size);
+                            }
+                            current_spirv_offset += shader->spirv_size;
+                        }
+                        
+                        modified_shader_data = std::move(new_shader_data);
+                    } else {
+                        // Same size - we can replace in-place
+                        std::cout << "    📝 Replacing SPIR-V data in-place at offset " << spirv_offset << std::endl;
+                        std::cout << "    📝 Original SPIR-V size: " << old_shader_size << " bytes" << std::endl;
+                        std::cout << "    📝 New SPIR-V size: " << new_shader_size << " bytes" << std::endl;
+                        
+                        std::memcpy(mod_ptr + spirv_offset, 
+                                   operation_data_.data() + op.data_offset, 
+                                   op.data_size);
+                                   
+                        // Verify the hash was updated
+                        std::cout << "    ✓ Shader info hash after update: 0x" << std::hex 
+                                 << shader_info->name_hash << std::dec << std::endl;
+                    }
+                    
+                    break;
+                }
+                
+                offset += sizeof(ShaderChunk::Shader);
+            }
+            
+            if (!found) {
+                std::cerr << "    ❌ Target shader not found!" << std::endl;
+                return false;
+            }
+            
+            // Update the asset with modified shader chunk
+            asset.remove_chunk(ChunkType::SHDR);
+            asset.add_chunk(ChunkType::SHDR, modified_shader_data, "overlay_modified_shaders");
+            
+            std::cout << "    ✅ Shader replaced successfully!" << std::endl;
             return true;
         }
 

@@ -15,7 +15,7 @@
 
 namespace tremor::taffy::tools {
 
-    bool createHotPinkVertexOverlay(const std::string& output_path);
+    bool createHotPinkShaderOverlay(const std::string& output_path);
 
     bool createShaderChunkHashDebug(Taffy::Asset& asset,
         const std::vector<uint32_t>& mesh_spirv,

@@ -14,8 +14,6 @@ add_library(Taffy STATIC
 add_executable(taffy_compiler
     Taffy.cpp
     include/tools.cpp  # Need tools implementation for the functions
-    create_fixed_triangle.cpp  # Fixed triangle generator with indices
-    include/mesh_shader_generator.cpp  # Mesh shader generator
 )
 
 # Create RGB test triangle generator (commented out - file doesn't exist)
