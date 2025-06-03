@@ -69,7 +69,7 @@ namespace tremor::taffy::tools {
     overlay.add_target_asset("assets/tri.taf", "^1.0.0");  // Target the new format
     
     // Change vertex 1 (the green one) to hot pink
-    overlay.add_vertex_color_change(0, 1.0f, 0.0f, 0.4125f, 1.0f);  // Hot pink color!
+    overlay.add_vertex_color_change(0, 0.0f, 1.0f, 1.0f, 1.0f);  // Hot pink color!
     overlay.add_vertex_color_change(1, 1.0f, 0.0f, 0.0f, 1.0f);  // Hot pink color!
     overlay.add_vertex_color_change(2, 1.0f, 0.0f, 0.0f, 1.0f);  // Hot pink color!
     
@@ -463,26 +463,27 @@ layout(triangles, max_vertices = 3, max_primitives = 1) out;
 // Output vertex data
 layout(location = 0) out vec4 fragColor[];
 
-// Vertex positions and colors
-const vec3 positions[3] = vec3[](
-    vec3( 0.0,  0.5, 0.0),  // Top vertex
-    vec3(-0.5, -0.5, 0.0),  // Bottom left
-    vec3( 0.5, -0.5, 0.0)   // Bottom right
-);
-
-const vec3 colors[3] = vec3[](
-    vec3(1.0, 0.0, 0.0),    // Red
-    vec3(0.0, 1.0, 0.0),    // Green (this is what overlays will change!)
-    vec3(0.0, 0.0, 1.0)     // Blue
-);
-
 void main() {
     SetMeshOutputsEXT(3, 1); // 3 vertices, 1 triangle
     
-    // Generate triangle vertices
-    for (int i = 0; i < 3; ++i) {
+    // Triangle positions
+    vec3 positions[3] = vec3[](
+        vec3( 0.0,  0.5, 0.0),  // Top
+        vec3(-0.5, -0.5, 0.0),  // Bottom left
+        vec3( 0.5, -0.5, 0.0)   // Bottom right
+    );
+    
+    // Colors from TAF file: Yellow, Magenta, Red
+    vec4 colors[3] = vec4[](
+        vec4(1.0, 1.0, 0.0, 1.0),  // Yellow (from TAF vertex 0)
+        vec4(1.0, 0.0, 1.0, 1.0),  // Magenta (from TAF vertex 1)  
+        vec4(1.0, 0.0, 0.0, 1.0)   // Red (from TAF vertex 2)
+    );
+    
+    // Set vertex data
+    for (uint i = 0; i < 3; ++i) {
         gl_MeshVerticesEXT[i].gl_Position = vec4(positions[i], 1.0);
-        fragColor[i] = vec4(colors[i], 1.0);
+        fragColor[i] = colors[i];
     }
     
     // Generate triangle indices  
@@ -1279,6 +1280,8 @@ void main() {
                 std::vector<VertexAttribute> attributes;
                 uint32_t vertex_stride = 0;  // In BYTES
                 uint32_t vertex_count = 0;
+                bool has_indices = false;
+                uint32_t index_count = 0;
             };
 
             static std::string generateMeshShader(const ShaderConfig& config) {
@@ -1312,7 +1315,7 @@ void main() {
                 shader << "    uint vertex_count;\n";
                 shader << "    uint primitive_count;\n";
                 shader << "    uint vertex_stride_floats;\n";  // Stride in FLOATS, not bytes
-                shader << "    uint reserved;\n";
+                shader << "    uint index_offset_bytes;\n";  // Offset to index data in buffer
                 shader << "} pc;\n\n";
 
                 // Output attributes
@@ -1342,12 +1345,22 @@ void main() {
                 shader << "    // Convert from quantized units (1/128mm) to world units\n";
                 shader << "    return vec3(x / 128000.0, y / 128000.0, z / 128000.0);\n";
                 shader << "}\n\n";
+                
+                // Index reader function
+                shader << "// Helper to read indices from buffer\n";
+                shader << "uint readIndex(uint indexNum) {\n";
+                shader << "    uint byte_offset = pc.index_offset_bytes + indexNum * 4u;\n";
+                shader << "    uint word_offset = byte_offset / 4u;\n";
+                shader << "    return vertexBuffer.vertices[word_offset];\n";
+                shader << "}\n\n";
 
                 // Other attribute accessors
                 generateAttributeAccessors(shader, config);
 
                 // Main function
                 shader << "void main() {\n";
+                shader << "    // Only let the first thread in the workgroup do the work\n";
+                shader << "    if (gl_LocalInvocationIndex != 0) return;\n\n";
                 shader << "    uint vertex_count = min(pc.vertex_count, " << config.max_vertices << "u);\n";
                 shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << "u);\n\n";
 
@@ -1371,7 +1384,8 @@ void main() {
             static std::string generateFragmentShader(const ShaderConfig& config) {
                 std::stringstream shader;
 
-                shader << "#version 460\n\n";
+                shader << "#version 460\n";
+                shader << "#extension GL_EXT_fragment_shader_barycentric : enable\n\n";
 
                 // Input attributes (skip position as it's handled by gl_Position)
                 for (size_t i = 0; i < config.attributes.size(); ++i) {
@@ -1381,8 +1395,51 @@ void main() {
                     shader << "layout(location = " << attr.location << ") in ";
                     shader << getGLSLType(attr.type) << " " << attr.name << ";\n";
                 }
+                
+                // Manual interpolation inputs
+                shader << "layout(location = 10) in flat uint primitiveID;\n";
+                shader << "layout(location = 11) in vec3 barycentricCoords;\n";
+                
+                // Storage buffer for vertex data (same as mesh shader)
+                shader << "\nlayout(set = 0, binding = 0) readonly buffer VertexBuffer {\n";
+                shader << "    uint vertices[];\n";
+                shader << "} vertexBuffer;\n\n";
+                
+                // Push constants (to know vertex stride)
+                shader << "layout(push_constant) uniform PushConstants {\n";
+                shader << "    mat4 mvp;\n";
+                shader << "    uint vertex_count;\n";
+                shader << "    uint primitive_count;\n";
+                shader << "    uint vertex_stride_floats;\n";
+                shader << "    uint index_offset_bytes;\n";
+                shader << "} pc;\n\n";
 
-                shader << "\nlayout(location = 0) out vec4 fragColor;\n\n";
+                shader << "layout(location = 0) out vec4 fragColor;\n\n";
+                
+                // Add index reader function if indices are used
+                if (config.has_indices) {
+                    shader << "// Helper to read indices from buffer\n";
+                    shader << "uint readIndex(uint indexNum) {\n";
+                    shader << "    uint byte_offset = pc.index_offset_bytes + indexNum * 4u;\n";
+                    shader << "    uint word_offset = byte_offset / 4u;\n";
+                    shader << "    return vertexBuffer.vertices[word_offset];\n";
+                    shader << "}\n\n";
+                }
+                
+                // Add function to read color from storage buffer
+                shader << "// Function to read color from vertex in storage buffer\n";
+                shader << "vec4 readVertexColor(uint vertexIndex) {\n";
+                shader << "    // Color is at byte offset 36 in the vertex structure\n";
+                shader << "    uint colorOffsetUints = 36u / 4u; // Convert byte offset to uint offset (9 uints)\n";
+                shader << "    uint offset = vertexIndex * pc.vertex_stride_floats + colorOffsetUints;\n";
+                shader << "    \n";
+                shader << "    return vec4(\n";
+                shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 0u]),\n";
+                shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 1u]),\n";
+                shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 2u]),\n";
+                shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 3u])\n";
+                shader << "    );\n";
+                shader << "}\n\n";
 
                 shader << "void main() {\n";
 
@@ -1394,7 +1451,41 @@ void main() {
                             shader << "    fragColor = vec4(" << attr.name << ", 1.0);\n";
                         }
                         else {
-                            shader << "    fragColor = " << attr.name << ";\n";
+                            // Manual color interpolation using primitive ID and barycentric coordinates
+                            shader << "    // Manual interpolation for mesh shader\n";
+                            shader << "    uint primitiveID = uint(gl_PrimitiveID);\n";
+                            shader << "    \n";
+                            shader << "    // Calculate vertex indices for this primitive\n";
+                            if (config.has_indices) {
+                                shader << "    uint v0 = readIndex(primitiveID * 3u);\n";
+                                shader << "    uint v1 = readIndex(primitiveID * 3u + 1u);\n";
+                                shader << "    uint v2 = readIndex(primitiveID * 3u + 2u);\n";
+                            } else {
+                                shader << "    uint v0 = primitiveID * 3u;\n";
+                                shader << "    uint v1 = primitiveID * 3u + 1u;\n";
+                                shader << "    uint v2 = primitiveID * 3u + 2u;\n";
+                            }
+                            shader << "    \n";
+                            shader << "    // Read vertex colors\n";
+                            shader << "    vec4 color0 = readVertexColor(v0);\n";
+                            shader << "    vec4 color1 = readVertexColor(v1);\n";
+                            shader << "    vec4 color2 = readVertexColor(v2);\n";
+                            shader << "    \n";
+                            shader << "    // Use hardware barycentric coordinates if available\n";
+                            shader << "    vec3 bary;\n";
+                            shader << "    if (gl_BaryCoordEXT.x >= 0.0) {\n";
+                            shader << "        // Hardware barycentric coordinates are available\n";
+                            shader << "        bary = vec3(gl_BaryCoordEXT.x, gl_BaryCoordEXT.y, 1.0 - gl_BaryCoordEXT.x - gl_BaryCoordEXT.y);\n";
+                            shader << "    } else {\n";
+                            shader << "        // Fallback - use center of triangle\n";
+                            shader << "        bary = vec3(0.333, 0.333, 0.334);\n";
+                            shader << "    }\n";
+                            shader << "    \n";
+                            shader << "    // Interpolate colors using barycentric coordinates\n";
+                            shader << "    fragColor = vec4(\n";
+                            shader << "        color0.rgb * bary.x + color1.rgb * bary.y + color2.rgb * bary.z,\n";
+                            shader << "        1.0\n";
+                            shader << "    );\n";
                         }
                         hasColor = true;
                         break;
@@ -1419,6 +1510,11 @@ void main() {
                     shader << "layout(location = " << attr.location << ") out "
                         << getGLSLType(attr.type) << " " << attr.name << "[];\n";
                 }
+                
+                // Add outputs for manual interpolation
+                shader << "// Data for manual interpolation in fragment shader\n";
+                shader << "layout(location = 10) out flat uint primitiveID[];\n";
+                shader << "layout(location = 11) out vec3 barycentricCoords[];\n";
                 shader << "\n";
             }
 
@@ -1432,37 +1528,37 @@ void main() {
                     shader << getGLSLType(attr.type) << " read_" << attr.name
                         << "(uint vertexIndex) {\n";
 
-                    // Calculate offset in floats
-                    uint32_t offsetFloats = attr.offset / sizeof(float);
+                    // Calculate offset in uint32 units (since buffer is uint array)
+                    uint32_t offsetUints = attr.offset / sizeof(uint32_t);
                     shader << "    uint offset = vertexIndex * pc.vertex_stride_floats + "
-                        << offsetFloats << "u;\n";
+                        << offsetUints << "u;\n";
 
                     switch (attr.type) {
                     case VertexAttribute::Float:
-                        shader << "    return vertexBuffer.vertices[offset];\n";
+                        shader << "    return uintBitsToFloat(vertexBuffer.vertices[offset]);\n";
                         break;
 
                     case VertexAttribute::Float2:
                         shader << "    return vec2(\n";
-                        shader << "        vertexBuffer.vertices[offset],\n";
-                        shader << "        vertexBuffer.vertices[offset + 1u]\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset]),\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 1u])\n";
                         shader << "    );\n";
                         break;
 
                     case VertexAttribute::Float3:
                         shader << "    return vec3(\n";
-                        shader << "        vertexBuffer.vertices[offset],\n";
-                        shader << "        vertexBuffer.vertices[offset + 1u],\n";
-                        shader << "        vertexBuffer.vertices[offset + 2u]\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset]),\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 1u]),\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 2u])\n";
                         shader << "    );\n";
                         break;
 
                     case VertexAttribute::Float4:
                         shader << "    return vec4(\n";
-                        shader << "        vertexBuffer.vertices[offset],\n";
-                        shader << "        vertexBuffer.vertices[offset + 1u],\n";
-                        shader << "        vertexBuffer.vertices[offset + 2u],\n";
-                        shader << "        vertexBuffer.vertices[offset + 3u]\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset]),\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 1u]),\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 2u]),\n";
+                        shader << "        uintBitsToFloat(vertexBuffer.vertices[offset + 3u])\n";
                         shader << "    );\n";
                         break;
 
@@ -1490,8 +1586,25 @@ void main() {
                     }
                     else {
                         shader << "        " << attr.name << "[i] = read_" << attr.name << "(i);\n";
+                        // Debug: Show different colors per vertex to verify reading
+                        if (strcmp(attr.name, "color") == 0) {
+                            shader << "        // DEBUG: Verify each vertex gets different data\n";
+                            shader << "        vec4 readColor = read_" << attr.name << "(i);\n";
+                            shader << "        " << attr.name << "[i] = readColor;\n";
+                            shader << "        // Also output vertex index as color for debugging\n";
+                            shader << "        " << attr.name << "[i] = vec4(float(i), float(i)/2.0, 0.0, 1.0);\n";
+                        }
                     }
                 }
+                
+                // Set primitive ID (same for all vertices of a primitive)
+                shader << "        primitiveID[i] = 0u; // All vertices belong to primitive 0\n";
+                
+                // Set barycentric coordinates for each vertex
+                shader << "        // Set barycentric coordinates for manual interpolation\n";
+                shader << "        if (i == 0u) barycentricCoords[i] = vec3(1.0, 0.0, 0.0);\n";
+                shader << "        else if (i == 1u) barycentricCoords[i] = vec3(0.0, 1.0, 0.0);\n";
+                shader << "        else if (i == 2u) barycentricCoords[i] = vec3(0.0, 0.0, 1.0);\n";
             }
 
             static void generatePrimitiveGeneration(std::stringstream& shader, const ShaderConfig& config) {
@@ -1500,7 +1613,14 @@ void main() {
                 switch (config.primitive_type) {
                 case GeometryChunk::Triangles:
                     shader << "    for (uint i = 0; i < primitive_count; ++i) {\n";
-                    shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(i*3u, i*3u+1u, i*3u+2u);\n";
+                    if (config.has_indices) {
+                        shader << "        uint idx0 = readIndex(i * 3u);\n";
+                        shader << "        uint idx1 = readIndex(i * 3u + 1u);\n";
+                        shader << "        uint idx2 = readIndex(i * 3u + 2u);\n";
+                        shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(idx0, idx1, idx2);\n";
+                    } else {
+                        shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(i*3u, i*3u+1u, i*3u+2u);\n";
+                    }
                     shader << "    }\n";
                     break;
 
@@ -1557,29 +1677,36 @@ void main() {
                 FeatureFlags::EmbeddedShaders |
                 FeatureFlags::HashBasedNames);
 
-            // Create vertex data with Vec3Q positions
+#pragma pack(push, 1)
+ 
+            // Create vertex data with Vec3Q positions (96-byte layout to match Tremor)
             struct Vertex {
-                Vec3Q position;     // 24 bytes (6 floats)
-                float normal[3];    // 12 bytes (3 floats)
-                float color[4];     // 16 bytes (4 floats)
-                float uv[2];        // 8 bytes (2 floats)
-                float tangent[4];   // 16 bytes (4 floats) - xyz=tangent, w=handedness
+                Vec3Q position;     // 24 bytes
+                float normal[3];    // 12 bytes
+                float color[4];     // 16 bytes
+                float uv[2];        // 8 bytes
+                float tangent[4];   // 8 bytes
             }; // Total: 76 bytes (19 floats)
+            
+#pragma pack(pop)
 
             std::vector<Vertex> vertices = {
                 // Top vertex - Yellow
-                {Vec3Q{0, 64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{0, 64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.5f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}},
                 // Bottom left - Magenta  
-                {Vec3Q{-64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}},
                 // Bottom right - Red
-                {Vec3Q{64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}}
+                {Vec3Q{64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}
             };
 
             // Create geometry chunk with mesh shader configuration  
             GeometryChunk geom_header{};
             geom_header.vertex_count = static_cast<uint32_t>(vertices.size());
-            geom_header.index_count = 0; // Not used in mesh shaders
+            // Add indices for indexed mesh shader support
+            std::vector<uint32_t> indices = {0, 1, 2};
+            geom_header.index_count = static_cast<uint32_t>(indices.size());
             geom_header.vertex_stride = sizeof(Vertex);
+            std::cout << "DEBUG: Vertex struct size is " << sizeof(Vertex) << " bytes" << std::endl;
             geom_header.vertex_format = VertexFormat::Position3D | VertexFormat::Normal |
                 VertexFormat::Color | VertexFormat::TexCoord0 | VertexFormat::Tangent;
             geom_header.bounds_min = Vec3Q{ -500, -500, 0 };
@@ -1597,9 +1724,10 @@ void main() {
             geom_header.ms_primitive_type = GeometryChunk::Triangles;
             geom_header.ms_flags = 0;
 
-            // Create geometry data buffer
+            // Create geometry data buffer including indices
             size_t vertex_data_size = vertices.size() * sizeof(Vertex);
-            size_t total_size = sizeof(GeometryChunk) + vertex_data_size;
+            size_t index_data_size = indices.size() * sizeof(uint32_t);
+            size_t total_size = sizeof(GeometryChunk) + vertex_data_size + index_data_size;
 
             std::vector<uint8_t> geom_data(total_size);
             size_t offset = 0;
@@ -1610,6 +1738,10 @@ void main() {
 
             // Copy vertex data
             std::memcpy(geom_data.data() + offset, vertices.data(), vertex_data_size);
+            offset += vertex_data_size;
+            
+            // Copy index data
+            std::memcpy(geom_data.data() + offset, indices.data(), index_data_size);
 
             asset.add_chunk(ChunkType::GEOM, geom_data, "vec3q_triangle_geometry");
 
@@ -1623,6 +1755,8 @@ void main() {
             config.primitive_type = static_cast<GeometryChunk::PrimitiveType>(geom_header.ms_primitive_type);
             config.vertex_stride = geom_header.vertex_stride;
             config.vertex_count = geom_header.vertex_count;
+            config.has_indices = (geom_header.index_count > 0);
+            config.index_count = geom_header.index_count;
 
             // Define vertex attributes with correct offsets for Vec3Q
             config.attributes = {

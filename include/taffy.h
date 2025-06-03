@@ -315,6 +315,7 @@ namespace Taffy {
             uint32_t reserved[4];       // Future expansion
         };
 #pragma pack(pop)  // Restore default alignment
+
         // =============================================================================
         // MAIN ASSET CLASS
         // =============================================================================

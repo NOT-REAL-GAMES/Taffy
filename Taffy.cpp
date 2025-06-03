@@ -50,7 +50,10 @@ int main(int argc, char* argv[]) {
 
 	DataDrivenAssetCompiler compiler{};
 
-	compiler.createDataDrivenTriangle(outMaster);
+	// compiler.createDataDrivenTriangle(outMaster);
+	// Use the fixed triangle version that includes indices
+	extern bool createFixedTriangle(const std::string& output_path);
+	createFixedTriangle(outMaster);
 
 	return createHotPinkVertexOverlay(outOverlay);
 			

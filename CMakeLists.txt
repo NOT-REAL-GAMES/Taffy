@@ -14,7 +14,21 @@ add_library(Taffy STATIC
 add_executable(taffy_compiler
     Taffy.cpp
     include/tools.cpp  # Need tools implementation for the functions
+    create_fixed_triangle.cpp  # Fixed triangle generator with indices
+    include/mesh_shader_generator.cpp  # Mesh shader generator
 )
+
+# Create RGB test triangle generator (commented out - file doesn't exist)
+# add_executable(create_test_rgb_triangle
+#     create_test_rgb_triangle.cpp
+#     include/tools.cpp
+#     include/mesh_shader_generator.cpp
+# )
+
+# Test indexed mesh shader generation
+# add_executable(test_indexed_mesh
+#     test_indexed_mesh.cpp
+# )
 
 # Find and link shaderc
 find_library(SHADERC_COMBINED_LIBRARY NAMES shaderc_combined)
@@ -34,12 +48,35 @@ target_link_libraries(taffy_compiler PRIVATE
     ${SHADERC_LIBS}
 )
 
+# target_link_libraries(create_test_rgb_triangle PRIVATE
+#     Taffy
+#     ${SPIRV_CROSS_LIBRARIES}
+#     ${SHADERC_LIBS}
+# )
+
+# target_link_libraries(test_indexed_mesh PRIVATE
+#     ${SPIRV_CROSS_LIBRARIES}
+#     ${SHADERC_LIBS}
+# )
+
 # Set include directories for compiler
 target_include_directories(taffy_compiler PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${SPIRV_CROSS_INCLUDE_DIRS}
 )
+
+# target_include_directories(create_test_rgb_triangle PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}/include
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+#     ${SPIRV_CROSS_INCLUDE_DIRS}
+# )
+
+# target_include_directories(test_indexed_mesh PRIVATE
+#     ${CMAKE_CURRENT_SOURCE_DIR}/include
+#     ${CMAKE_CURRENT_SOURCE_DIR}
+#     ${SPIRV_CROSS_INCLUDE_DIRS}
+# )
 
 # Set include directories
 target_include_directories(Taffy PUBLIC
@@ -65,10 +102,16 @@ target_compile_features(Taffy PUBLIC cxx_std_20)
 target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
 target_compile_definitions(Taffy PRIVATE USE_SHADERC)
 
-# Set output directory for compiler
+# Set output directory for executables
 set_target_properties(taffy_compiler PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
+# set_target_properties(create_test_rgb_triangle PROPERTIES
+#     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+# )
+# set_target_properties(test_indexed_mesh PROPERTIES
+#     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+# )
 
 # Platform-specific settings
 if(WIN32)

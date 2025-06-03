@@ -5,8 +5,8 @@
 
 #pragma pack(push, 1)
 
-struct alignas(16) Vec3Q {
-    alignas(16) int64_t x, y, z;
+struct Vec3Q {
+    int64_t x, y, z;
 
     Vec3Q() : x(0), y(0), z(0) {}
     Vec3Q(int64_t x, int64_t y, int64_t z) : x(x), y(y), z(z) {}

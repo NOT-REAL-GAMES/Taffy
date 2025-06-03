@@ -183,6 +183,8 @@ namespace Taffy {
         std::cout << "    Creator: " << header_.creator << std::endl;
         std::cout << "    Description: " << header_.description << std::endl;
         std::cout << "    Chunks: " << header_.chunk_count << std::endl;
+        std::cout << "    Feature flags: " << static_cast<uint64_t>(header_.feature_flags) << std::endl;
+        std::cout << "    Total size: " << header_.total_size << std::endl;
 
         // Debug: Show current file position
         std::cout << "  📍 File position before chunk directory: " << file.tellg() << std::endl;
