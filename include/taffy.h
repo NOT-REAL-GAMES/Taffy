@@ -126,6 +126,7 @@ namespace Taffy {
             SCPT = 0x54504353,  // 'SCPT'
             PHYS = 0x53594850,  // 'PHYS'
             AUDI = 0x49445541,  // 'AUDI'
+            FONT = 0x544e4f46,  // 'FONT' - SDF font data
             OVRL = 0x4C52564F,  // 'OVRL'
             CHKO = 0x4F4B4843,  // 'CHKO'
             FRAC = 0x43415246,  // 'FRAC'
@@ -152,6 +153,7 @@ namespace Taffy {
             VirtualTextures = 1ULL << 13,
             SVGUI = 1ULL << 14,
             OverlaySupport = 1ULL << 15,
+            SDFFont = 1ULL << 16,         // Signed Distance Field fonts
             AIBehavior = 1ULL << 32,
             NPUProcessing = 1ULL << 33,
             LocalLLM = 1ULL << 34,
@@ -416,6 +418,61 @@ namespace Taffy {
             char name[32];              // Chunk name (for debugging)
             uint32_t reserved[4];       // Future expansion
         };
+        // =============================================================================
+        // SDF FONT CHUNK - Signed Distance Field font rendering
+        // =============================================================================
+        struct FontChunk {
+            uint32_t glyph_count;          // Number of glyphs in the font
+            uint32_t texture_width;        // Width of the SDF texture atlas
+            uint32_t texture_height;       // Height of the SDF texture atlas
+            uint32_t texture_format;       // Texture format (usually R8 for SDF)
+            float sdf_range;               // Distance range in pixels for SDF
+            float font_size;               // Base font size used for generation
+            float ascent;                  // Font ascent in pixels
+            float descent;                 // Font descent in pixels
+            float line_height;             // Recommended line height
+            uint32_t first_codepoint;      // First Unicode codepoint in the font
+            uint32_t last_codepoint;       // Last Unicode codepoint in the font
+            uint32_t kerning_pair_count;   // Number of kerning pairs
+            uint64_t texture_data_offset;  // Offset to texture data from chunk start
+            uint64_t texture_data_size;    // Size of texture data in bytes
+            uint64_t glyph_data_offset;    // Offset to glyph data array
+            uint64_t kerning_data_offset;  // Offset to kerning pair data
+            uint32_t reserved[8];          // Reserved for future use
+
+            // Glyph information
+            struct Glyph {
+                uint32_t codepoint;        // Unicode codepoint
+                float uv_x;                // Texture coordinate X (0-1)
+                float uv_y;                // Texture coordinate Y (0-1)
+                float uv_width;            // Width in texture space (0-1)
+                float uv_height;           // Height in texture space (0-1)
+                float width;               // Glyph width in pixels
+                float height;              // Glyph height in pixels
+                float bearing_x;           // Horizontal bearing
+                float bearing_y;           // Vertical bearing
+                float advance;             // Horizontal advance
+                uint32_t reserved[2];      // Reserved for future use
+            };
+
+            // Kerning pair information
+            struct KerningPair {
+                uint32_t first;            // First character codepoint
+                uint32_t second;           // Second character codepoint
+                float amount;              // Kerning amount in pixels
+                uint32_t reserved;         // Reserved for future use
+            };
+
+            // Font metrics for different styles (optional)
+            struct FontStyle {
+                uint32_t style_flags;      // Bold, italic, etc.
+                float weight;              // Font weight (100-900)
+                float slant;               // Italic slant angle
+                float outline_width;       // For outlined fonts
+                uint32_t reserved[4];      // Reserved
+            };
+        };
+
 #pragma pack(pop)  // Restore default alignment
 
         // =============================================================================

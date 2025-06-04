@@ -151,20 +151,10 @@ bool createSineWaveAudioAsset(const std::string& output_path, float frequency, f
     return false;
 }
 
-bool createHotPinkShaderOverlay(const std::string& output_path) {
-    // Temporary stub - we'll need to properly fix tools.cpp later
-    std::cout << "⚠️  createHotPinkShaderOverlay is temporarily stubbed out" << std::endl;
-    return false;
-}
 
 } // namespace tremor::taffy::tools
 
 namespace Taffy {
 
-bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path) {
-    // Temporary stub - we'll need to properly fix tools.cpp later
-    std::cout << "⚠️  createDataDrivenTriangle is temporarily stubbed out" << std::endl;
-    return false;
-}
 
 } // namespace Taffy

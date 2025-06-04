@@ -7,15 +7,17 @@ find_package(SPIRVCross REQUIRED)
 # Create Taffy library
 add_library(Taffy STATIC
     Taffy.cpp
-    # include/tools.cpp  # Temporarily disabled due to namespace issues
+    include/tools.cpp  
     taffy_audio_tools.cpp  # Audio tools
+    taffy_font_tools.cpp   # SDF font tools
 )
 
 # Create Taffy compiler executable (uses Taffy.cpp as main)
 add_executable(taffy_compiler
     Taffy.cpp
-    # include/tools.cpp  # Temporarily disabled due to namespace issues
+    include/tools.cpp  
     taffy_audio_tools.cpp  # Audio tools
+    taffy_font_tools.cpp   # SDF font tools
 )
 
 # Create RGB test triangle generator (commented out - file doesn't exist)

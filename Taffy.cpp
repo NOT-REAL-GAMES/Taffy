@@ -31,6 +31,7 @@
 #include "include/overlay.h"
 #include "include/asset.h"
 #include "include/tools.h"
+#include "include/taffy_font_tools.h"
 
 using namespace Taffy;
 
@@ -45,6 +46,7 @@ int main(int argc, char* argv[]) {
 
 	std::string outMaster = argv[1];
 	std::string outOverlay = argv[2];
+	std::string outFont = argv[3];
 
 	Taffy::Asset ass;
 
@@ -55,6 +57,8 @@ int main(int argc, char* argv[]) {
 	//extern bool createFixedTriangle(const std::string& output_path);
 	//createFixedTriangle(outMaster);
 
+	tremor::taffy::tools::createSDFFontAsset(
+        outFont, "assets/fonts/BebasNeue-Regular.ttf", 128, 2048, 1.0f);
 
 	return createHotPinkShaderOverlay(outOverlay);
 			
