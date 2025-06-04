@@ -1,5 +1,4 @@
-﻿#pragma once
-#include "tools.h"
+﻿#include "tools.h"
 #include "quan.h"
 #include "asset.h"
 
@@ -114,6 +113,8 @@ void main() {
     
     return false;
 }
+
+} // namespace tremor::taffy::tools
 
 // =============================================================================
 // WIREFRAME SHADER OVERLAY CREATOR

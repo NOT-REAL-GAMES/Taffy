@@ -274,6 +274,108 @@ namespace Taffy {
             };
         };
 
+        struct AudioChunk {
+            uint32_t node_count;          // Number of audio processing nodes
+            uint32_t connection_count;    // Number of node connections
+            uint32_t pattern_count;       // Number of tracker patterns
+            uint32_t sample_count;        // Number of wavetable samples
+            uint32_t parameter_count;     // Number of exposed parameters
+            uint32_t sample_rate;         // Default sample rate (e.g. 48000)
+            uint32_t tick_rate;           // Tracker ticks per second
+            uint32_t reserved[5];
+
+            // Audio processing node types
+            enum class NodeType : uint32_t {
+                // Generators
+                Oscillator = 0,
+                WaveTablePlayer = 1,
+                NoiseGenerator = 2,
+                Sampler = 3,
+                
+                // Processors
+                Filter = 10,
+                Amplifier = 11,
+                Envelope = 12,
+                LFO = 13,
+                Delay = 14,
+                Reverb = 15,
+                Distortion = 16,
+                Compressor = 17,
+                
+                // Utility
+                Mixer = 20,
+                Splitter = 21,
+                Math = 22,
+                
+                // Game-aware nodes
+                GameState = 30,          // Reads game state (player count, etc)
+                Proximity = 31,          // Spatial audio based on distance
+                CombatIntensity = 32,    // Reacts to combat events
+                
+                // Control
+                PatternPlayer = 40,      // Plays tracker patterns
+                Parameter = 41,          // Exposed parameter input
+                Random = 42,             // Random value generator
+                
+                // Custom VM nodes
+                VMNode = 100             // Custom bytecode processing
+            };
+
+            struct Node {
+                uint32_t id;             // Unique node identifier
+                NodeType type;           // Node type
+                uint64_t name_hash;      // Hash of node name
+                float position[2];       // Visual position in editor
+                uint32_t input_count;    // Number of inputs
+                uint32_t output_count;   // Number of outputs
+                uint32_t param_offset;   // Offset into parameter data
+                uint32_t param_count;    // Number of parameters for this node
+                uint32_t reserved[4];
+            };
+
+            struct Connection {
+                uint32_t source_node;    // Source node ID
+                uint32_t source_output;  // Output index on source
+                uint32_t dest_node;      // Destination node ID  
+                uint32_t dest_input;     // Input index on destination
+                float strength;          // Connection strength (0-1)
+                uint32_t reserved[3];
+            };
+
+            struct Pattern {
+                uint64_t name_hash;      // Pattern name hash
+                uint32_t channel_count;  // Number of channels
+                uint32_t row_count;      // Number of rows
+                uint32_t ticks_per_row;  // Timing resolution
+                uint32_t data_offset;    // Offset to pattern data
+                uint32_t data_size;      // Size of pattern data
+                uint32_t reserved[3];
+            };
+
+            struct Parameter {
+                uint64_t name_hash;      // Parameter name hash
+                float default_value;     // Default value
+                float min_value;         // Minimum value
+                float max_value;         // Maximum value
+                float curve;             // Response curve (1.0 = linear)
+                uint32_t flags;          // Parameter flags
+                uint32_t reserved[2];
+            };
+
+            struct WaveTable {
+                uint64_t name_hash;      // Sample name hash
+                uint32_t sample_count;   // Number of samples
+                uint32_t channel_count;  // 1 = mono, 2 = stereo
+                uint32_t bit_depth;      // 8, 16, 24, or 32
+                uint32_t data_offset;    // Offset to sample data
+                uint32_t data_size;      // Size of sample data
+                float base_frequency;    // Base frequency for pitch
+                uint32_t loop_start;     // Loop start point
+                uint32_t loop_end;       // Loop end point
+                uint32_t reserved[3];
+            };
+        };
+
 #pragma pack(pop)
 
         // =============================================================================

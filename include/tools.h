@@ -16,6 +16,8 @@
 namespace tremor::taffy::tools {
 
     bool createHotPinkShaderOverlay(const std::string& output_path);
+    
+    bool createSineWaveAudioAsset(const std::string& output_path, float frequency = 440.0f, float duration = 1.0f);
 
     bool createShaderChunkHashDebug(Taffy::Asset& asset,
         const std::vector<uint32_t>& mesh_spirv,
