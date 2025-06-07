@@ -1384,6 +1384,320 @@ bool loadWAVFile(const std::string& wavPath,
     return true;
 }
 
+bool createBitcrushedImportAsset(const std::string& output_path) {
+    std::cout << "🎵 Creating bit-crushed imported sample asset..." << std::endl;
+    
+    using namespace Taffy;
+    
+    // First, load the original imported sample to get the wavetable data
+    Asset originalAsset;
+    if (!originalAsset.load_from_file_safe("assets/audio/imported_sample.taf")) {
+        std::cerr << "❌ Could not load imported_sample.taf - make sure you've imported your song first!" << std::endl;
+        return false;
+    }
+    
+    auto originalAudioData = originalAsset.get_chunk_data(ChunkType::AUDI);
+    if (!originalAudioData) {
+        std::cerr << "❌ No audio chunk in imported sample!" << std::endl;
+        return false;
+    }
+    
+    // Extract the wavetable from the original
+    const uint8_t* origPtr = originalAudioData->data();
+    AudioChunk origHeader;
+    std::memcpy(&origHeader, origPtr, sizeof(AudioChunk));
+    origPtr += sizeof(AudioChunk);
+    
+    // Skip to the wavetable
+    size_t skipSize = origHeader.node_count * sizeof(AudioChunk::Node) +
+                      origHeader.connection_count * sizeof(AudioChunk::Connection) +
+                      origHeader.parameter_count * sizeof(AudioChunk::Parameter);
+    origPtr += skipSize;
+    
+    // Read wavetable
+    AudioChunk::WaveTable origWavetable;
+    std::memcpy(&origWavetable, origPtr, sizeof(AudioChunk::WaveTable));
+    origPtr += sizeof(AudioChunk::WaveTable);
+    
+    // Now create a new asset with bit crusher
+    Asset asset;
+    asset.set_creator("Taffy BitCrush Sample Creator");
+    asset.set_description("Imported sample with bit crusher effect");
+    asset.set_feature_flags(FeatureFlags::Audio);
+    
+    // Audio chunk header
+    AudioChunk header;
+    std::memset(&header, 0, sizeof(header));
+    header.node_count = 5;         // gate parameter, sampler, distortion, amplifier, time parameter
+    header.connection_count = 4;   // gate->sampler, sampler->distortion, distortion->amp, time->sampler
+    header.parameter_count = 10;   // gate, sample_index, pitch, start_position, loop, drive, mix, type, amplitude, time
+    header.sample_rate = origHeader.sample_rate;
+    header.sample_count = 1;       // We have the imported sample
+    
+    // Calculate sizes
+    size_t headerSize = sizeof(AudioChunk);
+    size_t nodesSize = header.node_count * sizeof(AudioChunk::Node);
+    size_t connectionsSize = header.connection_count * sizeof(AudioChunk::Connection);
+    size_t paramsSize = header.parameter_count * sizeof(AudioChunk::Parameter);
+    size_t wavetableSize = sizeof(AudioChunk::WaveTable);
+    size_t totalSize = headerSize + nodesSize + connectionsSize + paramsSize + 
+                       wavetableSize + origWavetable.data_size;
+    
+    // Create audio chunk data
+    std::vector<uint8_t> audioChunk(totalSize);
+    uint8_t* ptr = audioChunk.data();
+    
+    // Write header
+    std::memcpy(ptr, &header, headerSize);
+    ptr += headerSize;
+    
+    // Create nodes
+    std::vector<AudioChunk::Node> nodes;
+    
+    // Node 0: Gate parameter
+    AudioChunk::Node gate;
+    std::memset(&gate, 0, sizeof(gate));
+    gate.id = 0;
+    gate.type = AudioChunk::NodeType::Parameter;
+    gate.name_hash = fnv1a_hash("gate_parameter");
+    gate.position[0] = 100.0f;
+    gate.position[1] = 100.0f;
+    gate.input_count = 0;
+    gate.output_count = 1;
+    gate.param_offset = 0;
+    gate.param_count = 1;
+    nodes.push_back(gate);
+    
+    // Node 1: Sampler
+    AudioChunk::Node sampler;
+    std::memset(&sampler, 0, sizeof(sampler));
+    sampler.id = 1;
+    sampler.type = AudioChunk::NodeType::Sampler;
+    sampler.name_hash = fnv1a_hash("imported_sampler");
+    sampler.position[0] = 300.0f;
+    sampler.position[1] = 100.0f;
+    sampler.input_count = 2;     // trigger, pitch mod
+    sampler.output_count = 1;
+    sampler.param_offset = 1;    // sample_index, pitch, start_position, loop
+    sampler.param_count = 4;
+    nodes.push_back(sampler);
+    
+    // Node 2: Bit Crusher (Distortion)
+    AudioChunk::Node distortion;
+    std::memset(&distortion, 0, sizeof(distortion));
+    distortion.id = 2;
+    distortion.type = AudioChunk::NodeType::Distortion;
+    distortion.name_hash = fnv1a_hash("bit_crusher");
+    distortion.position[0] = 500.0f;
+    distortion.position[1] = 100.0f;
+    distortion.input_count = 1;
+    distortion.output_count = 1;
+    distortion.param_offset = 5;   // drive, mix, type
+    distortion.param_count = 3;
+    nodes.push_back(distortion);
+    
+    // Node 3: Amplifier
+    AudioChunk::Node amplifier;
+    std::memset(&amplifier, 0, sizeof(amplifier));
+    amplifier.id = 3;
+    amplifier.type = AudioChunk::NodeType::Amplifier;
+    amplifier.name_hash = fnv1a_hash("output_amp");
+    amplifier.position[0] = 700.0f;
+    amplifier.position[1] = 100.0f;
+    amplifier.input_count = 2;
+    amplifier.output_count = 1;
+    amplifier.param_offset = 8;    // amplitude
+    amplifier.param_count = 1;
+    nodes.push_back(amplifier);
+    
+    // Node 4: Time parameter
+    AudioChunk::Node timeParam;
+    std::memset(&timeParam, 0, sizeof(timeParam));
+    timeParam.id = 4;
+    timeParam.type = AudioChunk::NodeType::Parameter;
+    timeParam.name_hash = fnv1a_hash("time_parameter");
+    timeParam.position[0] = 100.0f;
+    timeParam.position[1] = 200.0f;
+    timeParam.input_count = 0;
+    timeParam.output_count = 1;
+    timeParam.param_offset = 9;
+    timeParam.param_count = 1;
+    nodes.push_back(timeParam);
+    
+    // Write nodes
+    std::memcpy(ptr, nodes.data(), nodes.size() * sizeof(AudioChunk::Node));
+    ptr += nodes.size() * sizeof(AudioChunk::Node);
+    
+    // Create connections
+    std::vector<AudioChunk::Connection> connections;
+    
+    // Gate -> Sampler trigger
+    AudioChunk::Connection conn1;
+    conn1.source_node = 0;
+    conn1.source_output = 0;
+    conn1.dest_node = 1;
+    conn1.dest_input = 0;
+    conn1.strength = 1.0f;
+    connections.push_back(conn1);
+    
+    // Sampler -> Bit Crusher
+    AudioChunk::Connection conn2;
+    conn2.source_node = 1;
+    conn2.source_output = 0;
+    conn2.dest_node = 2;
+    conn2.dest_input = 0;
+    conn2.strength = 1.0f;
+    connections.push_back(conn2);
+    
+    // Bit Crusher -> Amplifier
+    AudioChunk::Connection conn3;
+    conn3.source_node = 2;
+    conn3.source_output = 0;
+    conn3.dest_node = 3;
+    conn3.dest_input = 0;
+    conn3.strength = 1.0f;
+    connections.push_back(conn3);
+    
+    // Time -> Sampler (pitch modulation, inactive)
+    AudioChunk::Connection conn4;
+    conn4.source_node = 4;
+    conn4.source_output = 0;
+    conn4.dest_node = 1;
+    conn4.dest_input = 1;
+    conn4.strength = 0.0f;
+    connections.push_back(conn4);
+    
+    // Write connections
+    std::memcpy(ptr, connections.data(), connections.size() * sizeof(AudioChunk::Connection));
+    ptr += connections.size() * sizeof(AudioChunk::Connection);
+    
+    // Create parameters
+    std::vector<AudioChunk::Parameter> parameters;
+    
+    // Gate (starts at 1.0 to trigger sample playback)
+    AudioChunk::Parameter gateParam;
+    gateParam.name_hash = fnv1a_hash("gate");
+    gateParam.default_value = 1.0f;  // Start triggered
+    gateParam.min_value = 0.0f;
+    gateParam.max_value = 1.0f;
+    gateParam.curve = 1.0f;
+    parameters.push_back(gateParam);
+    
+    // Sample index
+    AudioChunk::Parameter sampleIndex;
+    sampleIndex.name_hash = fnv1a_hash("sample_index");
+    sampleIndex.default_value = 0.0f;
+    sampleIndex.min_value = 0.0f;
+    sampleIndex.max_value = 0.0f;
+    sampleIndex.curve = 1.0f;
+    parameters.push_back(sampleIndex);
+    
+    // Pitch
+    AudioChunk::Parameter pitch;
+    pitch.name_hash = fnv1a_hash("pitch");
+    pitch.default_value = 1.0f;
+    pitch.min_value = 0.25f;
+    pitch.max_value = 4.0f;
+    pitch.curve = 1.0f;
+    parameters.push_back(pitch);
+    
+    // Start position
+    AudioChunk::Parameter startPos;
+    startPos.name_hash = fnv1a_hash("start_position");
+    startPos.default_value = 0.0f;
+    startPos.min_value = 0.0f;
+    startPos.max_value = 1.0f;
+    startPos.curve = 1.0f;
+    parameters.push_back(startPos);
+    
+    // Loop
+    AudioChunk::Parameter loop;
+    loop.name_hash = fnv1a_hash("loop");
+    loop.default_value = 0.0f;
+    loop.min_value = 0.0f;
+    loop.max_value = 1.0f;
+    loop.curve = 1.0f;
+    parameters.push_back(loop);
+    
+    // Bit crusher drive
+    AudioChunk::Parameter drive;
+    drive.name_hash = fnv1a_hash("drive");
+    drive.default_value = 5.0f;  // Moderate bit crushing
+    drive.min_value = 0.1f;
+    drive.max_value = 20.0f;
+    drive.curve = 1.0f;
+    parameters.push_back(drive);
+    
+    // Mix
+    AudioChunk::Parameter mix;
+    mix.name_hash = fnv1a_hash("mix");
+    mix.default_value = 1.0f;  // 100% wet
+    mix.min_value = 0.0f;
+    mix.max_value = 1.0f;
+    mix.curve = 1.0f;
+    parameters.push_back(mix);
+    
+    // Type (3 = BitCrush)
+    AudioChunk::Parameter type;
+    type.name_hash = fnv1a_hash("type");
+    type.default_value = 3.0f;  // BitCrush
+    type.min_value = 0.0f;
+    type.max_value = 5.0f;
+    type.curve = 1.0f;
+    parameters.push_back(type);
+    
+    // Amplitude
+    AudioChunk::Parameter amplitude;
+    amplitude.name_hash = fnv1a_hash("amplitude");
+    amplitude.default_value = 0.5f;  // Reduced to prevent clipping
+    amplitude.min_value = 0.0f;
+    amplitude.max_value = 1.0f;
+    amplitude.curve = 1.0f;
+    parameters.push_back(amplitude);
+    
+    // Time
+    AudioChunk::Parameter time;
+    time.name_hash = fnv1a_hash("time");
+    time.default_value = 0.0f;
+    time.min_value = 0.0f;
+    time.max_value = 10.0f;
+    time.curve = 1.0f;
+    parameters.push_back(time);
+    
+    // Write parameters
+    std::memcpy(ptr, parameters.data(), parameters.size() * sizeof(AudioChunk::Parameter));
+    ptr += parameters.size() * sizeof(AudioChunk::Parameter);
+    
+    // Copy wavetable with updated offset
+    AudioChunk::WaveTable wavetable = origWavetable;
+    wavetable.data_offset = headerSize + nodesSize + connectionsSize + paramsSize + wavetableSize;
+    
+    // Write wavetable
+    std::memcpy(ptr, &wavetable, wavetableSize);
+    ptr += wavetableSize;
+    
+    // Copy sample data
+    std::memcpy(ptr, origPtr, origWavetable.data_size);
+    
+    // Add chunk to asset
+    asset.add_chunk(ChunkType::AUDI, audioChunk, "bitcrushed_import_audio");
+    
+    // Save
+    std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
+    
+    if (asset.save_to_file(output_path)) {
+        std::cout << "✅ Bit-crushed import asset created: " << output_path << std::endl;
+        std::cout << "   🎼 Audio graph:" << std::endl;
+        std::cout << "      Gate → Sampler → BitCrusher → Amplifier → Output" << std::endl;
+        std::cout << "   🎚️ Bit crusher drive: 6.0x" << std::endl;
+        std::cout << "   💥 100% wet signal for bit crushing effect" << std::endl;
+        std::cout << "   🎵 Your song will now be permanently bit-crushed in this TAF file!" << std::endl;
+        return true;
+    }
+    
+    return false;
+}
+
 } // namespace tremor::taffy::tools
 
 namespace Taffy {

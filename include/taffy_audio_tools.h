@@ -107,4 +107,11 @@ namespace tremor::taffy::tools {
                      uint32_t& outSampleRate,
                      uint32_t& outChannelCount);
 
+    /**
+     * Create a bit-crushed version of the imported sample
+     * @param output_path Path to save the .taf file
+     * @return true if successful
+     */
+    bool createBitcrushedImportAsset(const std::string& output_path);
+
 } // namespace tremor::taffy::tools
