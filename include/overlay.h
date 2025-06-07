@@ -206,7 +206,7 @@ namespace Taffy {
 
         // Load overlay from file
         bool load_from_file(const std::string& path) {
-            std::cout << "📖 Loading hash-based overlay from: " << path << std::endl;
+            //std::cout << "📖 Loading hash-based overlay from: " << path << std::endl;
 
             std::ifstream file(path, std::ios::binary);
             if (!file.is_open()) {
@@ -221,10 +221,10 @@ namespace Taffy {
                 return false;
             }
 
-            std::cout << "  📋 Overlay info:" << std::endl;
+            /*std::cout << "  📋 Overlay info:" << std::endl;
             std::cout << "    Version: " << header_.version_major << "." << header_.version_minor << "." << header_.version_patch << std::endl;
             std::cout << "    Creator: " << header_.creator << std::endl;
-            std::cout << "    Operations: " << header_.operation_count << std::endl;
+            std::cout << "    Operations: " << header_.operation_count << std::endl;*/
 
             // Read targets
             targets_.clear();
@@ -245,10 +245,10 @@ namespace Taffy {
                 targets_.size() * sizeof(TargetAsset) -
                 operations_.size() * sizeof(OverlayOperation);
 
-            std::cout << "    📊 Calculated operation data size: " << data_size << " bytes" << std::endl;
+            /*std::cout << "    📊 Calculated operation data size: " << data_size << " bytes" << std::endl;
             std::cout << "    📊 Header size: " << sizeof(OverlayHeader) << " bytes" << std::endl;
             std::cout << "    📊 Target size: " << sizeof(TargetAsset) << " bytes" << std::endl;
-            std::cout << "    📊 Operation size: " << sizeof(OverlayOperation) << " bytes" << std::endl;
+            std::cout << "    📊 Operation size: " << sizeof(OverlayOperation) << " bytes" << std::endl;*/
 
             operation_data_.clear();
             operation_data_.resize(data_size);
@@ -316,9 +316,9 @@ namespace Taffy {
 
     private:
         bool apply_shader_replacement(Asset& asset, const OverlayOperation& op) const {
-            std::cout << "  🔄 Applying shader replacement..." << std::endl;
+            /*std::cout << "  🔄 Applying shader replacement..." << std::endl;
             std::cout << "    Target hash: 0x" << std::hex << op.target_hash << std::dec << std::endl;
-            std::cout << "    Replacement hash: 0x" << std::hex << op.replacement_hash << std::dec << std::endl;
+            std::cout << "    Replacement hash: 0x" << std::hex << op.replacement_hash << std::dec << std::endl;*/
 
             // Get the shader chunk
             auto shader_data = asset.get_chunk_data(ChunkType::SHDR);
@@ -416,9 +416,9 @@ namespace Taffy {
                         modified_shader_data = std::move(new_shader_data);
                     } else {
                         // Same size - we can replace in-place
-                        std::cout << "    📝 Replacing SPIR-V data in-place at offset " << spirv_offset << std::endl;
+                        /*std::cout << "    📝 Replacing SPIR-V data in-place at offset " << spirv_offset << std::endl;
                         std::cout << "    📝 Original SPIR-V size: " << old_shader_size << " bytes" << std::endl;
-                        std::cout << "    📝 New SPIR-V size: " << new_shader_size << " bytes" << std::endl;
+                        std::cout << "    📝 New SPIR-V size: " << new_shader_size << " bytes" << std::endl;*/
                         
                         std::memcpy(mod_ptr + spirv_offset, 
                                    operation_data_.data() + op.data_offset, 
