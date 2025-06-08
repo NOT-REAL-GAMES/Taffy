@@ -235,24 +235,24 @@ if(WIN32 AND DEFINED ENV{VULKAN_SDK})
     find_path(SDL2_INCLUDE_DIR
         NAMES SDL.h
         PATHS 
-            ${VULKAN_SDK_PATH}/Third-Party/Include
-            ${VULKAN_SDK_PATH}/Third-Party/Include/SDL2
+            ${VULKAN_SDK_PATH}/Include
+            ${VULKAN_SDK_PATH}/Include/SDL2
         NO_DEFAULT_PATH
     )
     
     find_library(SDL2_LIBRARY
         NAMES SDL2
         PATHS
-            ${VULKAN_SDK_PATH}/Third-Party/Bin
-            ${VULKAN_SDK_PATH}/Third-Party/Lib
+            ${VULKAN_SDK_PATH}/Bin
+            ${VULKAN_SDK_PATH}/Lib
         NO_DEFAULT_PATH
     )
     
     find_library(SDL2MAIN_LIBRARY
         NAMES SDL2main
         PATHS
-            ${VULKAN_SDK_PATH}/Third-Party/Bin
-            ${VULKAN_SDK_PATH}/Third-Party/Lib
+            ${VULKAN_SDK_PATH}/Bin
+            ${VULKAN_SDK_PATH}/Lib
         NO_DEFAULT_PATH
     )
     
