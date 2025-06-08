@@ -226,5 +226,66 @@ if(WIN32)
     target_compile_definitions(Taffy PRIVATE WIN32_LEAN_AND_MEAN)
 endif()
 
+# Find SDL2 (optional for future graphical editor)
+set(SDL2_FOUND FALSE)
+if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+    set(VULKAN_SDK_PATH $ENV{VULKAN_SDK})
+    
+    # Look for SDL2 in Vulkan SDK Third-Party folder
+    find_path(SDL2_INCLUDE_DIR
+        NAMES SDL.h
+        PATHS 
+            ${VULKAN_SDK_PATH}/Third-Party/Include
+            ${VULKAN_SDK_PATH}/Third-Party/Include/SDL2
+        NO_DEFAULT_PATH
+    )
+    
+    find_library(SDL2_LIBRARY
+        NAMES SDL2
+        PATHS
+            ${VULKAN_SDK_PATH}/Third-Party/Bin
+            ${VULKAN_SDK_PATH}/Third-Party/Lib
+        NO_DEFAULT_PATH
+    )
+    
+    find_library(SDL2MAIN_LIBRARY
+        NAMES SDL2main
+        PATHS
+            ${VULKAN_SDK_PATH}/Third-Party/Bin
+            ${VULKAN_SDK_PATH}/Third-Party/Lib
+        NO_DEFAULT_PATH
+    )
+    
+    if(SDL2_INCLUDE_DIR AND SDL2_LIBRARY)
+        set(SDL2_FOUND TRUE)
+        set(SDL2_INCLUDE_DIRS ${SDL2_INCLUDE_DIR})
+        set(SDL2_LIBRARIES ${SDL2_LIBRARY})
+        if(SDL2MAIN_LIBRARY)
+            list(APPEND SDL2_LIBRARIES ${SDL2MAIN_LIBRARY})
+        endif()
+        message(STATUS "Found SDL2 in Vulkan SDK: ${VULKAN_SDK_PATH}")
+        message(STATUS "  Include: ${SDL2_INCLUDE_DIRS}")
+        message(STATUS "  Libraries: ${SDL2_LIBRARIES}")
+        
+        # Create imported target for modern CMake
+        add_library(SDL2::SDL2 INTERFACE IMPORTED)
+        set_target_properties(SDL2::SDL2 PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${SDL2_INCLUDE_DIRS}"
+            INTERFACE_LINK_LIBRARIES "${SDL2_LIBRARIES}"
+        )
+    endif()
+else()
+    # On non-Windows platforms, use standard find_package
+    find_package(SDL2 QUIET)
+endif()
+
+if(SDL2_FOUND)
+    message(STATUS "SDL2 found - graphical editor features will be available")
+    target_compile_definitions(Taffy PRIVATE HAS_SDL2)
+    target_compile_definitions(taffy_compiler PRIVATE HAS_SDL2)
+else()
+    message(STATUS "SDL2 not found - graphical editor features will be disabled")
+endif()
+
 # Export for use by Tremor
 set(TAFFY_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include PARENT_SCOPE)
