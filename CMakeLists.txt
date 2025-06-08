@@ -4,8 +4,61 @@ project(Taffy VERSION 0.1.0 LANGUAGES CXX)
 # Add custom module path for finding packages
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
-# Find SPIRV-Cross
-find_package(SPIRVCross REQUIRED)
+# Try to find SPIRV-Cross
+find_package(SPIRVCross QUIET)
+
+# If not found via find_package, try to locate it manually in Vulkan SDK
+if(NOT SPIRVCross_FOUND)
+    if(DEFINED ENV{VULKAN_SDK})
+        set(VULKAN_SDK_PATH $ENV{VULKAN_SDK})
+        
+        # Look for SPIRV-Cross headers
+        find_path(SPIRV_CROSS_INCLUDE_DIR
+            NAMES spirv_cross/spirv_cross.hpp
+            PATHS 
+                ${VULKAN_SDK_PATH}/Include
+                ${VULKAN_SDK_PATH}/include
+            NO_DEFAULT_PATH
+        )
+        
+        # Look for SPIRV-Cross libraries
+        set(SPIRV_CROSS_LIB_NAMES 
+            spirv-cross-core
+            spirv-cross-glsl
+            spirv-cross-hlsl
+            spirv-cross-cpp
+        )
+        
+        set(SPIRV_CROSS_LIBRARIES "")
+        foreach(lib ${SPIRV_CROSS_LIB_NAMES})
+            find_library(${lib}_LIB
+                NAMES ${lib}
+                PATHS
+                    ${VULKAN_SDK_PATH}/Lib
+                    ${VULKAN_SDK_PATH}/Lib32
+                    ${VULKAN_SDK_PATH}/lib
+                NO_DEFAULT_PATH
+            )
+            if(${lib}_LIB)
+                list(APPEND SPIRV_CROSS_LIBRARIES ${${lib}_LIB})
+            endif()
+        endforeach()
+        
+        if(SPIRV_CROSS_INCLUDE_DIR AND SPIRV_CROSS_LIBRARIES)
+            set(SPIRVCross_FOUND TRUE)
+            set(SPIRV_CROSS_INCLUDE_DIRS ${SPIRV_CROSS_INCLUDE_DIR})
+            message(STATUS "Found SPIRV-Cross in Vulkan SDK: ${VULKAN_SDK_PATH}")
+        endif()
+    endif()
+endif()
+
+# Make SPIRV-Cross optional - disable transpilation features if not found
+if(NOT SPIRVCross_FOUND)
+    message(WARNING "SPIRV-Cross not found. Shader transpilation features will be disabled.")
+    message(WARNING "To enable transpilation, install SPIRV-Cross or ensure Vulkan SDK is properly installed.")
+    set(SPIRV_CROSS_INCLUDE_DIRS "")
+    set(SPIRV_CROSS_LIBRARIES "")
+endif()
 
 # Create Taffy library
 add_library(Taffy STATIC
@@ -47,11 +100,13 @@ else()
     message(FATAL_ERROR "shaderc not found. Please install libshaderc-dev")
 endif()
 
-# Link with SPIRV-Cross and shaderc libraries
-target_link_libraries(taffy_compiler PRIVATE 
-    ${SPIRV_CROSS_LIBRARIES}
-    ${SHADERC_LIBS}
-)
+# Link with shaderc libraries
+target_link_libraries(taffy_compiler PRIVATE ${SHADERC_LIBS})
+
+# Link with SPIRV-Cross if found
+if(SPIRVCross_FOUND)
+    target_link_libraries(taffy_compiler PRIVATE ${SPIRV_CROSS_LIBRARIES})
+endif()
 
 # target_link_libraries(create_test_rgb_triangle PRIVATE
 #     Taffy
@@ -68,8 +123,12 @@ target_link_libraries(taffy_compiler PRIVATE
 target_include_directories(taffy_compiler PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${SPIRV_CROSS_INCLUDE_DIRS}
 )
+
+# Add SPIRV-Cross includes if found
+if(SPIRVCross_FOUND)
+    target_include_directories(taffy_compiler PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
+endif()
 
 # target_include_directories(create_test_rgb_triangle PRIVATE
 #     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -89,12 +148,11 @@ target_include_directories(Taffy PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Add SPIRV-Cross
+# Add SPIRV-Cross if found
 if(SPIRVCross_FOUND)
     target_include_directories(Taffy PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
     target_link_libraries(Taffy PRIVATE ${SPIRV_CROSS_LIBRARIES})
-else()
-    message(FATAL_ERROR "SPIRV-Cross not found. Please install spirv-cross-dev")
+    target_compile_definitions(Taffy PRIVATE HAS_SPIRV_CROSS)
 endif()
 
 # Add shaderc to Taffy library as well
@@ -106,6 +164,11 @@ target_compile_features(Taffy PUBLIC cxx_std_20)
 # Define USE_SHADERC since we have it
 target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
 target_compile_definitions(Taffy PRIVATE USE_SHADERC)
+
+# Add HAS_SPIRV_CROSS definition if found
+if(SPIRVCross_FOUND)
+    target_compile_definitions(taffy_compiler PRIVATE HAS_SPIRV_CROSS)
+endif()
 
 # Set output directory for executables
 set_target_properties(taffy_compiler PROPERTIES
