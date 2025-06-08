@@ -92,16 +92,52 @@ add_executable(taffy_compiler
 find_library(SHADERC_COMBINED_LIBRARY NAMES shaderc_combined)
 find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc)
 
-if(SHADERC_COMBINED_LIBRARY)
-    set(SHADERC_LIBS ${SHADERC_COMBINED_LIBRARY})
-elseif(SHADERC_LIBRARY)
-    set(SHADERC_LIBS ${SHADERC_LIBRARY})
-else()
-    message(FATAL_ERROR "shaderc not found. Please install libshaderc-dev")
+# If not found in standard locations, check Vulkan SDK
+if(NOT SHADERC_COMBINED_LIBRARY AND NOT SHADERC_LIBRARY)
+    if(DEFINED ENV{VULKAN_SDK})
+        set(VULKAN_SDK_PATH $ENV{VULKAN_SDK})
+        
+        find_library(SHADERC_LIBRARY
+            NAMES shaderc_shared shaderc
+            PATHS
+                ${VULKAN_SDK_PATH}/Lib
+                ${VULKAN_SDK_PATH}/Lib32
+                ${VULKAN_SDK_PATH}/lib
+            NO_DEFAULT_PATH
+        )
+        
+        if(NOT SHADERC_LIBRARY)
+            find_library(SHADERC_COMBINED_LIBRARY
+                NAMES shaderc_combined
+                PATHS
+                    ${VULKAN_SDK_PATH}/Lib
+                    ${VULKAN_SDK_PATH}/Lib32
+                    ${VULKAN_SDK_PATH}/lib
+                NO_DEFAULT_PATH
+            )
+        endif()
+    endif()
 endif()
 
-# Link with shaderc libraries
-target_link_libraries(taffy_compiler PRIVATE ${SHADERC_LIBS})
+if(SHADERC_COMBINED_LIBRARY)
+    set(SHADERC_LIBS ${SHADERC_COMBINED_LIBRARY})
+    set(SHADERC_FOUND TRUE)
+    message(STATUS "Found shaderc (combined): ${SHADERC_COMBINED_LIBRARY}")
+elseif(SHADERC_LIBRARY)
+    set(SHADERC_LIBS ${SHADERC_LIBRARY})
+    set(SHADERC_FOUND TRUE)
+    message(STATUS "Found shaderc: ${SHADERC_LIBRARY}")
+else()
+    set(SHADERC_FOUND FALSE)
+    set(SHADERC_LIBS "")
+    message(WARNING "shaderc not found. Shader compilation features will be disabled.")
+    message(WARNING "To enable shader compilation, install shaderc or ensure Vulkan SDK is properly installed.")
+endif()
+
+# Link with shaderc libraries if found
+if(SHADERC_FOUND)
+    target_link_libraries(taffy_compiler PRIVATE ${SHADERC_LIBS})
+endif()
 
 # Link with SPIRV-Cross if found
 if(SPIRVCross_FOUND)
@@ -155,15 +191,19 @@ if(SPIRVCross_FOUND)
     target_compile_definitions(Taffy PRIVATE HAS_SPIRV_CROSS)
 endif()
 
-# Add shaderc to Taffy library as well
-target_link_libraries(Taffy PRIVATE ${SHADERC_LIBS})
+# Add shaderc to Taffy library if found
+if(SHADERC_FOUND)
+    target_link_libraries(Taffy PRIVATE ${SHADERC_LIBS})
+endif()
 
 # Set compile features
 target_compile_features(Taffy PUBLIC cxx_std_20)
 
-# Define USE_SHADERC since we have it
-target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
-target_compile_definitions(Taffy PRIVATE USE_SHADERC)
+# Define USE_SHADERC if we have it
+if(SHADERC_FOUND)
+    target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
+    target_compile_definitions(Taffy PRIVATE USE_SHADERC)
+endif()
 
 # Add HAS_SPIRV_CROSS definition if found
 if(SPIRVCross_FOUND)
