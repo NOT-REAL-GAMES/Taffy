@@ -60,21 +60,20 @@ if(NOT SPIRVCross_FOUND)
     set(SPIRV_CROSS_LIBRARIES "")
 endif()
 
-# Create Taffy library
+# Create Taffy library WITHOUT the main function
 add_library(Taffy STATIC
-    Taffy.cpp
     include/tools.cpp  
     taffy_audio_tools.cpp  # Audio tools
     taffy_font_tools.cpp   # SDF font tools
 )
 
-# Create Taffy compiler executable (uses Taffy.cpp as main)
+# Create Taffy compiler executable (uses Taffy.cpp which has main)
 add_executable(taffy_compiler
     Taffy.cpp
-    include/tools.cpp  
-    taffy_audio_tools.cpp  # Audio tools
-    taffy_font_tools.cpp   # SDF font tools
 )
+
+# Link the compiler with the Taffy library
+target_link_libraries(taffy_compiler PRIVATE Taffy)
 
 # Create RGB test triangle generator (commented out - file doesn't exist)
 # add_executable(create_test_rgb_triangle
@@ -137,11 +136,13 @@ endif()
 # Link with shaderc libraries if found
 if(SHADERC_FOUND)
     target_link_libraries(taffy_compiler PRIVATE ${SHADERC_LIBS})
+    target_link_libraries(Taffy PUBLIC ${SHADERC_LIBS})
 endif()
 
 # Link with SPIRV-Cross if found
 if(SPIRVCross_FOUND)
     target_link_libraries(taffy_compiler PRIVATE ${SPIRV_CROSS_LIBRARIES})
+    target_link_libraries(Taffy PUBLIC ${SPIRV_CROSS_LIBRARIES})
 endif()
 
 # target_link_libraries(create_test_rgb_triangle PRIVATE
@@ -187,13 +188,7 @@ target_include_directories(Taffy PUBLIC
 # Add SPIRV-Cross if found
 if(SPIRVCross_FOUND)
     target_include_directories(Taffy PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
-    target_link_libraries(Taffy PRIVATE ${SPIRV_CROSS_LIBRARIES})
     target_compile_definitions(Taffy PRIVATE HAS_SPIRV_CROSS)
-endif()
-
-# Add shaderc to Taffy library if found
-if(SHADERC_FOUND)
-    target_link_libraries(Taffy PRIVATE ${SHADERC_LIBS})
 endif()
 
 # Set compile features
