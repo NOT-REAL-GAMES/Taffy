@@ -284,7 +284,8 @@ namespace Taffy {
             uint32_t parameter_count;     // Number of exposed parameters
             uint32_t sample_rate;         // Default sample rate (e.g. 48000)
             uint32_t tick_rate;           // Tracker ticks per second
-            uint32_t reserved[5];
+            uint32_t streaming_count;      // Number of streaming audio entries
+            uint32_t reserved[4];
 
             // Audio processing node types
             enum class NodeType : uint32_t {
@@ -293,6 +294,7 @@ namespace Taffy {
                 WaveTablePlayer = 1,
                 NoiseGenerator = 2,
                 Sampler = 3,
+                StreamingSampler = 4,    // Streaming audio from disk
                 
                 // Processors
                 Filter = 10,
@@ -375,6 +377,20 @@ namespace Taffy {
                 uint32_t loop_start;     // Loop start point
                 uint32_t loop_end;       // Loop end point
                 uint32_t reserved[3];
+            };
+            
+            // Streaming audio chunk - references external audio data
+            struct StreamingAudio {
+                uint64_t name_hash;         // Stream name hash
+                uint32_t sample_rate;       // Sample rate (e.g., 44100, 48000)
+                uint32_t channel_count;     // 1 = mono, 2 = stereo
+                uint32_t bit_depth;         // 8, 16, 24, or 32
+                uint32_t total_samples;     // Total number of samples
+                uint32_t chunk_size;        // Samples per streaming chunk
+                uint32_t chunk_count;       // Number of chunks
+                uint64_t data_offset;       // Offset to first audio chunk
+                uint32_t format;            // Audio format (0=PCM, 1=float)
+                uint32_t reserved[7];
             };
         };
 

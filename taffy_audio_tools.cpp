@@ -4,6 +4,7 @@
 #include <iostream>
 #include <cstring>
 #include <filesystem>
+#include <ctime>
 
 namespace tremor::taffy::tools {
 
@@ -1622,7 +1623,7 @@ bool createBitcrushedImportAsset(const std::string& output_path) {
     // Bit crusher drive
     AudioChunk::Parameter drive;
     drive.name_hash = fnv1a_hash("drive");
-    drive.default_value = 5.0f;  // Moderate bit crushing
+    drive.default_value = 1.0f;  // Moderate bit crushing
     drive.min_value = 0.1f;
     drive.max_value = 20.0f;
     drive.curve = 1.0f;
@@ -1631,7 +1632,7 @@ bool createBitcrushedImportAsset(const std::string& output_path) {
     // Mix
     AudioChunk::Parameter mix;
     mix.name_hash = fnv1a_hash("mix");
-    mix.default_value = 1.0f;  // 100% wet
+    mix.default_value = 0.33f;  // 100% wet
     mix.min_value = 0.0f;
     mix.max_value = 1.0f;
     mix.curve = 1.0f;
@@ -1640,7 +1641,7 @@ bool createBitcrushedImportAsset(const std::string& output_path) {
     // Type (3 = BitCrush)
     AudioChunk::Parameter type;
     type.name_hash = fnv1a_hash("type");
-    type.default_value = 3.0f;  // BitCrush
+    type.default_value = 5.0f;  // BitCrush
     type.min_value = 0.0f;
     type.max_value = 5.0f;
     type.curve = 1.0f;
@@ -1649,7 +1650,7 @@ bool createBitcrushedImportAsset(const std::string& output_path) {
     // Amplitude
     AudioChunk::Parameter amplitude;
     amplitude.name_hash = fnv1a_hash("amplitude");
-    amplitude.default_value = 0.5f;  // Reduced to prevent clipping
+    amplitude.default_value = 1.0f;  // Reduced to prevent clipping
     amplitude.min_value = 0.0f;
     amplitude.max_value = 1.0f;
     amplitude.curve = 1.0f;
@@ -1698,9 +1699,502 @@ bool createBitcrushedImportAsset(const std::string& output_path) {
     return false;
 }
 
+bool createStreamingAudioAsset(const std::string& inputWavPath,
+                               const std::string& outputPath,
+                               uint32_t chunkSizeMs) {
+    // Load WAV file header to get info without loading all data
+    std::ifstream file(inputWavPath, std::ios::binary);
+    if (!file) {
+        std::cerr << "Failed to open WAV file: " << inputWavPath << std::endl;
+        return false;
+    }
+    
+    // Read WAV header
+    char riff[4];
+    file.read(riff, 4);
+    if (std::string(riff, 4) != "RIFF") {
+        std::cerr << "Not a valid WAV file: missing RIFF header" << std::endl;
+        return false;
+    }
+    
+    uint32_t fileSize;
+    file.read(reinterpret_cast<char*>(&fileSize), 4);
+    
+    char wave[4];
+    file.read(wave, 4);
+    if (std::string(wave, 4) != "WAVE") {
+        std::cerr << "Not a valid WAV file: missing WAVE header" << std::endl;
+        return false;
+    }
+    
+    // Find and read fmt chunk
+    uint32_t sampleRate = 0;
+    uint16_t channelCount = 0;
+    uint16_t bitsPerSample = 0;
+    uint32_t dataSize = 0;
+    uint64_t dataOffset = 0;
+    
+    while (!file.eof()) {
+        char chunkID[4];
+        file.read(chunkID, 4);
+        if (file.eof()) break;
+        
+        uint32_t chunkSize;
+        file.read(reinterpret_cast<char*>(&chunkSize), 4);
+        
+        if (std::string(chunkID, 4) == "fmt ") {
+            uint16_t audioFormat;
+            file.read(reinterpret_cast<char*>(&audioFormat), 2);
+            file.read(reinterpret_cast<char*>(&channelCount), 2);
+            file.read(reinterpret_cast<char*>(&sampleRate), 4);
+            file.seekg(6, std::ios::cur); // Skip byte rate and block align
+            file.read(reinterpret_cast<char*>(&bitsPerSample), 2);
+            
+            if (audioFormat != 1 && audioFormat != 3) { // 1 = PCM, 3 = float
+                std::cerr << "Unsupported audio format: " << audioFormat << std::endl;
+                return false;
+            }
+        } else if (std::string(chunkID, 4) == "data") {
+            dataSize = chunkSize;
+            dataOffset = file.tellg();
+            break;
+        } else {
+            file.seekg(chunkSize, std::ios::cur);
+        }
+    }
+    
+    if (dataOffset == 0) {
+        std::cerr << "No data chunk found in WAV file" << std::endl;
+        return false;
+    }
+    
+    file.close();
+    
+    // Calculate streaming parameters
+    uint32_t bytesPerSample = bitsPerSample / 8;
+    uint32_t totalSamples = dataSize / (bytesPerSample * channelCount);
+    uint32_t samplesPerChunk = (sampleRate * chunkSizeMs) / 1000;
+    uint32_t bytesPerChunk = samplesPerChunk * bytesPerSample * channelCount;
+    uint32_t chunkCount = (totalSamples + samplesPerChunk - 1) / samplesPerChunk;
+    
+    std::cout << "Creating streaming audio asset:" << std::endl;
+    std::cout << "  Input: " << inputWavPath << std::endl;
+    std::cout << "  Sample rate: " << sampleRate << " Hz" << std::endl;
+    std::cout << "  Channels: " << channelCount << std::endl;
+    std::cout << "  Bits per sample: " << bitsPerSample << std::endl;
+    std::cout << "  Total samples: " << totalSamples << " (" 
+              << static_cast<float>(totalSamples) / sampleRate << " seconds)" << std::endl;
+    std::cout << "  Chunk size: " << chunkSizeMs << " ms (" << samplesPerChunk << " samples)" << std::endl;
+    std::cout << "  Total chunks: " << chunkCount << std::endl;
+    
+    // CREATE PROPER TAFFY ASSET using Asset API
+    Taffy::Asset asset;
+    asset.set_creator("Taffy Streaming Audio Creator");
+    asset.set_description("Streaming audio from WAV file");
+    asset.set_feature_flags(Taffy::FeatureFlags::Audio);
+    
+    // Create audio chunk in memory
+    std::vector<uint8_t> audioChunkData;
+    
+    // Audio chunk header
+    Taffy::AudioChunk audioHeader;
+    audioHeader.node_count = 3;        // Parameter -> StreamingSampler -> Amplifier
+    audioHeader.connection_count = 2;   // Two connections
+    audioHeader.pattern_count = 0;     // No tracker patterns
+    audioHeader.sample_count = 0;       // No embedded samples (using streaming)
+    audioHeader.parameter_count = 5;    // gate, stream_index, pitch, start_position, amplitude
+    audioHeader.sample_rate = sampleRate;
+    audioHeader.tick_rate = 0;         // Not used for streaming
+    audioHeader.streaming_count = 1;    // One streaming audio
+    
+    // Initialize all reserved fields to 0
+    std::memset(audioHeader.reserved, 0, sizeof(audioHeader.reserved));
+    
+    audioChunkData.resize(sizeof(Taffy::AudioChunk));
+    std::memcpy(audioChunkData.data(), &audioHeader, sizeof(Taffy::AudioChunk));
+    
+    // Node 0: Parameter (gate)
+    Taffy::AudioChunk::Node paramNode;
+    paramNode.id = 0;
+    paramNode.type = Taffy::AudioChunk::NodeType::Parameter;
+    paramNode.input_count = 0;
+    paramNode.output_count = 1;
+    paramNode.param_offset = 0;
+    paramNode.param_count = 1; // gate
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&paramNode),
+                         reinterpret_cast<uint8_t*>(&paramNode) + sizeof(paramNode));
+    
+    // Node 1: StreamingSampler
+    Taffy::AudioChunk::Node streamNode;
+    streamNode.id = 1;
+    streamNode.type = Taffy::AudioChunk::NodeType::StreamingSampler;
+    streamNode.input_count = 1;
+    streamNode.output_count = 1;
+    streamNode.param_offset = 1;
+    streamNode.param_count = 3; // stream_index, pitch, start_position
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&streamNode),
+                         reinterpret_cast<uint8_t*>(&streamNode) + sizeof(streamNode));
+    
+    // Node 2: Amplifier
+    Taffy::AudioChunk::Node ampNode;
+    ampNode.id = 2;
+    ampNode.type = Taffy::AudioChunk::NodeType::Amplifier;
+    ampNode.input_count = 2;
+    ampNode.output_count = 1;
+    ampNode.param_offset = 4;
+    ampNode.param_count = 1; // amplitude
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&ampNode),
+                         reinterpret_cast<uint8_t*>(&ampNode) + sizeof(ampNode));
+    
+    // Connection 0: Parameter (gate) -> StreamingSampler
+    Taffy::AudioChunk::Connection conn1;
+    conn1.source_node = 0;
+    conn1.source_output = 0;
+    conn1.dest_node = 1;
+    conn1.dest_input = 0;
+    conn1.strength = 1.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&conn1),
+                         reinterpret_cast<uint8_t*>(&conn1) + sizeof(conn1));
+    
+    // Connection 1: StreamingSampler -> Amplifier
+    Taffy::AudioChunk::Connection conn2;
+    conn2.source_node = 1;
+    conn2.source_output = 0;
+    conn2.dest_node = 2;
+    conn2.dest_input = 0;
+    conn2.strength = 1.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&conn2),
+                         reinterpret_cast<uint8_t*>(&conn2) + sizeof(conn2));
+    
+    // Parameters
+    // gate
+    Taffy::AudioChunk::Parameter gateParam;
+    gateParam.name_hash = Taffy::fnv1a_hash("gate");
+    gateParam.default_value = 0.0f;
+    gateParam.min_value = 0.0f;
+    gateParam.max_value = 1.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&gateParam),
+                         reinterpret_cast<uint8_t*>(&gateParam) + sizeof(gateParam));
+    
+    // stream_index
+    Taffy::AudioChunk::Parameter streamIndexParam;
+    streamIndexParam.name_hash = Taffy::fnv1a_hash("stream_index");
+    streamIndexParam.default_value = 0.0f;
+    streamIndexParam.min_value = 0.0f;
+    streamIndexParam.max_value = 10.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&streamIndexParam),
+                         reinterpret_cast<uint8_t*>(&streamIndexParam) + sizeof(streamIndexParam));
+    
+    // pitch
+    Taffy::AudioChunk::Parameter pitchParam;
+    pitchParam.name_hash = Taffy::fnv1a_hash("pitch");
+    pitchParam.default_value = 1.0f;
+    pitchParam.min_value = 0.1f;
+    pitchParam.max_value = 4.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&pitchParam),
+                         reinterpret_cast<uint8_t*>(&pitchParam) + sizeof(pitchParam));
+    
+    // start_position
+    Taffy::AudioChunk::Parameter startPosParam;
+    startPosParam.name_hash = Taffy::fnv1a_hash("start_position");
+    startPosParam.default_value = 0.0f;
+    startPosParam.min_value = 0.0f;
+    startPosParam.max_value = 1.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&startPosParam),
+                         reinterpret_cast<uint8_t*>(&startPosParam) + sizeof(startPosParam));
+    
+    // amplitude
+    Taffy::AudioChunk::Parameter ampParam;
+    ampParam.name_hash = Taffy::fnv1a_hash("amplitude");
+    ampParam.default_value = 1.0f;
+    ampParam.min_value = 0.0f;
+    ampParam.max_value = 2.0f;
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&ampParam),
+                         reinterpret_cast<uint8_t*>(&ampParam) + sizeof(ampParam));
+    
+    // Streaming audio info
+    Taffy::AudioChunk::StreamingAudio streamInfo;
+    std::memset(&streamInfo, 0, sizeof(streamInfo)); // Initialize entire struct to 0
+    streamInfo.name_hash = Taffy::fnv1a_hash("main_stream");
+    streamInfo.sample_rate = sampleRate;
+    streamInfo.channel_count = channelCount;
+    streamInfo.bit_depth = bitsPerSample;
+    streamInfo.total_samples = totalSamples;
+    streamInfo.chunk_size = samplesPerChunk;
+    streamInfo.chunk_count = chunkCount;
+    // Data offset will be from the start of the audio chunk data
+    streamInfo.data_offset = audioChunkData.size() + sizeof(streamInfo);
+    streamInfo.format = (bitsPerSample == 32) ? 1 : 0; // 1 for float, 0 for PCM
+    
+    audioChunkData.insert(audioChunkData.end(),
+                         reinterpret_cast<uint8_t*>(&streamInfo),
+                         reinterpret_cast<uint8_t*>(&streamInfo) + sizeof(streamInfo));
+    
+    // Now add the actual audio data from the WAV file
+    std::ifstream wavFile(inputWavPath, std::ios::binary);
+    wavFile.seekg(dataOffset);
+    
+    // Read and append audio data in chunks to avoid loading entire file at once
+    const size_t copyBufferSize = 1024 * 1024; // 1MB buffer
+    std::vector<uint8_t> buffer(copyBufferSize);
+    size_t remaining = dataSize;
+    
+    while (remaining > 0) {
+        size_t toRead = std::min(remaining, copyBufferSize);
+        wavFile.read(reinterpret_cast<char*>(buffer.data()), toRead);
+        audioChunkData.insert(audioChunkData.end(), buffer.begin(), buffer.begin() + toRead);
+        remaining -= toRead;
+    }
+    
+    wavFile.close();
+    
+    // Add audio chunk to asset
+    asset.add_chunk(Taffy::ChunkType::AUDI, audioChunkData, "streaming_audio");
+    
+    // Save asset
+    std::cout << "💾 Saving streaming asset to: " << outputPath << std::endl;
+    
+    // Ensure directory exists
+    auto parentPath = std::filesystem::path(outputPath).parent_path();
+    if (!parentPath.empty() && !std::filesystem::exists(parentPath)) {
+        std::filesystem::create_directories(parentPath);
+    }
+    
+    if (!asset.save_to_file(outputPath)) {
+        std::cerr << "❌ Failed to save streaming asset!" << std::endl;
+        return false;
+    }
+    
+    std::cout << "✅ Streaming audio asset created successfully!" << std::endl;
+    std::cout << "   📊 Total TAF size: " << (audioChunkData.size() / (1024.0 * 1024.0)) << " MB" << std::endl;
+    std::cout << "   🎵 Duration: " << static_cast<float>(totalSamples) / sampleRate << " seconds" << std::endl;
+    std::cout << "   📦 Chunk size: " << chunkSizeMs << " ms" << std::endl;
+    std::cout << "   🔄 Total chunks: " << chunkCount << std::endl;
+    std::cout << "   📍 Audio data offset in chunk: " << streamInfo.data_offset << std::endl;
+    
+    return true;
+}
+
 } // namespace tremor::taffy::tools
 
 namespace Taffy {
 
 
 } // namespace Taffy
+
+namespace tremor::taffy::tools {
+
+    bool createStreamingTestAsset(const std::string& outputPath) {
+        std::cout << "🎵 Creating test streaming audio asset..." << std::endl;
+        std::cout << "   Output path: " << outputPath << std::endl;
+        
+        // Generate 10 seconds of 440Hz sine wave at 48kHz
+        const uint32_t sampleRate = 48000;
+        const uint32_t duration = 10; // seconds
+        const uint32_t totalSamples = sampleRate * duration;
+        const uint32_t chunkSize = sampleRate / 2; // 500ms chunks
+        const uint32_t chunkCount = (totalSamples + chunkSize - 1) / chunkSize;
+        
+        std::cout << "   Total samples: " << totalSamples << std::endl;
+        std::cout << "   Chunk size: " << chunkSize << " samples (500ms)" << std::endl;
+        std::cout << "   Total chunks: " << chunkCount << std::endl;
+        
+        // Create TAF asset
+        Taffy::Asset asset;
+        asset.set_creator("Taffy Streaming Test Creator");
+        asset.set_description("Test streaming audio with 10 second sine wave");
+        asset.set_feature_flags(Taffy::FeatureFlags::Audio);
+        
+        // Create audio chunk
+        std::vector<uint8_t> audioChunkData;
+        
+        // Audio chunk header
+        Taffy::AudioChunk audioHeader;
+        audioHeader.node_count = 3;        // StreamingSampler -> Amplifier -> Parameter
+        audioHeader.connection_count = 2;   // Two connections
+        audioHeader.pattern_count = 0;     // No tracker patterns
+        audioHeader.sample_count = 0;       // No embedded samples
+        audioHeader.parameter_count = 5;    // stream_index, pitch, start_position, amplitude, gate
+        audioHeader.sample_rate = sampleRate;
+        audioHeader.tick_rate = 0;         // Not used for streaming
+        audioHeader.streaming_count = 1;    // One streaming audio
+        
+        // Initialize all reserved fields to 0
+        std::memset(audioHeader.reserved, 0, sizeof(audioHeader.reserved));
+        
+        audioChunkData.resize(sizeof(Taffy::AudioChunk));
+        std::memcpy(audioChunkData.data(), &audioHeader, sizeof(Taffy::AudioChunk));
+        
+        // Node 0: StreamingSampler
+        Taffy::AudioChunk::Node streamNode;
+        streamNode.id = 0;
+        streamNode.type = Taffy::AudioChunk::NodeType::StreamingSampler;
+        streamNode.input_count = 1;
+        streamNode.output_count = 1;
+        streamNode.param_offset = 0;
+        streamNode.param_count = 3; // stream_index, pitch, start_position
+        audioChunkData.insert(audioChunkData.end(), 
+                             reinterpret_cast<uint8_t*>(&streamNode),
+                             reinterpret_cast<uint8_t*>(&streamNode) + sizeof(streamNode));
+        
+        // Node 1: Amplifier
+        Taffy::AudioChunk::Node ampNode;
+        ampNode.id = 1;
+        ampNode.type = Taffy::AudioChunk::NodeType::Amplifier;
+        ampNode.input_count = 2;
+        ampNode.output_count = 1;
+        ampNode.param_offset = 3;
+        ampNode.param_count = 1; // amplitude
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&ampNode),
+                             reinterpret_cast<uint8_t*>(&ampNode) + sizeof(ampNode));
+        
+        // Node 2: Parameter (gate)
+        Taffy::AudioChunk::Node paramNode;
+        paramNode.id = 2;
+        paramNode.type = Taffy::AudioChunk::NodeType::Parameter;
+        paramNode.input_count = 0;
+        paramNode.output_count = 1;
+        paramNode.param_offset = 4;
+        paramNode.param_count = 1; // gate
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&paramNode),
+                             reinterpret_cast<uint8_t*>(&paramNode) + sizeof(paramNode));
+        
+        // Connection 0: StreamingSampler -> Amplifier
+        Taffy::AudioChunk::Connection conn1;
+        conn1.source_node = 0;
+        conn1.source_output = 0;
+        conn1.dest_node = 1;
+        conn1.dest_input = 0;
+        conn1.strength = 1.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&conn1),
+                             reinterpret_cast<uint8_t*>(&conn1) + sizeof(conn1));
+        
+        // Connection 1: Parameter (gate) -> StreamingSampler
+        Taffy::AudioChunk::Connection conn2;
+        conn2.source_node = 2;
+        conn2.source_output = 0;
+        conn2.dest_node = 0;
+        conn2.dest_input = 0;
+        conn2.strength = 1.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&conn2),
+                             reinterpret_cast<uint8_t*>(&conn2) + sizeof(conn2));
+        
+        // Parameters
+        // stream_index
+        Taffy::AudioChunk::Parameter streamIndexParam;
+        streamIndexParam.name_hash = Taffy::fnv1a_hash("stream_index");
+        streamIndexParam.default_value = 0.0f;
+        streamIndexParam.min_value = 0.0f;
+        streamIndexParam.max_value = 10.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&streamIndexParam),
+                             reinterpret_cast<uint8_t*>(&streamIndexParam) + sizeof(streamIndexParam));
+        
+        // pitch
+        Taffy::AudioChunk::Parameter pitchParam;
+        pitchParam.name_hash = Taffy::fnv1a_hash("pitch");
+        pitchParam.default_value = 1.0f;
+        pitchParam.min_value = 0.1f;
+        pitchParam.max_value = 4.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&pitchParam),
+                             reinterpret_cast<uint8_t*>(&pitchParam) + sizeof(pitchParam));
+        
+        // start_position
+        Taffy::AudioChunk::Parameter startPosParam;
+        startPosParam.name_hash = Taffy::fnv1a_hash("start_position");
+        startPosParam.default_value = 0.0f;
+        startPosParam.min_value = 0.0f;
+        startPosParam.max_value = 1.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&startPosParam),
+                             reinterpret_cast<uint8_t*>(&startPosParam) + sizeof(startPosParam));
+        
+        // amplitude
+        Taffy::AudioChunk::Parameter ampParam;
+        ampParam.name_hash = Taffy::fnv1a_hash("amplitude");
+        ampParam.default_value = 0.7f;
+        ampParam.min_value = 0.0f;
+        ampParam.max_value = 1.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&ampParam),
+                             reinterpret_cast<uint8_t*>(&ampParam) + sizeof(ampParam));
+        
+        // gate
+        Taffy::AudioChunk::Parameter gateParam;
+        gateParam.name_hash = Taffy::fnv1a_hash("gate");
+        gateParam.default_value = 0.0f;
+        gateParam.min_value = 0.0f;
+        gateParam.max_value = 1.0f;
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&gateParam),
+                             reinterpret_cast<uint8_t*>(&gateParam) + sizeof(gateParam));
+        
+        // Streaming audio info
+        Taffy::AudioChunk::StreamingAudio streamInfo;
+        std::memset(&streamInfo, 0, sizeof(streamInfo)); // Initialize entire struct to 0
+        streamInfo.name_hash = Taffy::fnv1a_hash("test_stream");
+        streamInfo.sample_rate = sampleRate;
+        streamInfo.channel_count = 1;
+        streamInfo.bit_depth = 32;
+        streamInfo.total_samples = totalSamples;
+        streamInfo.chunk_size = chunkSize;
+        streamInfo.chunk_count = chunkCount;
+        // Data offset will be from the start of the audio chunk data
+        streamInfo.data_offset = audioChunkData.size() + sizeof(streamInfo);
+        streamInfo.format = 1; // Float format
+        
+        audioChunkData.insert(audioChunkData.end(),
+                             reinterpret_cast<uint8_t*>(&streamInfo),
+                             reinterpret_cast<uint8_t*>(&streamInfo) + sizeof(streamInfo));
+        
+        // Generate and append audio data
+        std::cout << "   Generating sine wave data..." << std::endl;
+        const float frequency = 440.0f;
+        const float twoPi = 2.0f * 3.14159265f;
+        
+        for (uint32_t i = 0; i < totalSamples; ++i) {
+            float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+            float sample = std::sin(twoPi * frequency * t) * 0.8f;
+            audioChunkData.insert(audioChunkData.end(),
+                                 reinterpret_cast<uint8_t*>(&sample),
+                                 reinterpret_cast<uint8_t*>(&sample) + sizeof(sample));
+        }
+        
+        // Add audio chunk to asset
+        asset.add_chunk(Taffy::ChunkType::AUDI, audioChunkData, "streaming_test_audio");
+        
+        // Save asset
+        std::cout << "💾 Saving streaming asset to: " << outputPath << std::endl;
+        
+        // Ensure directory exists
+        std::filesystem::create_directories(std::filesystem::path(outputPath).parent_path());
+        
+        if (!asset.save_to_file(outputPath)) {
+            std::cerr << "❌ Failed to save streaming asset!" << std::endl;
+            return false;
+        }
+        
+        std::cout << "✅ Streaming test asset created successfully!" << std::endl;
+        std::cout << "   📊 Total size: " << audioChunkData.size() << " bytes" << std::endl;
+        std::cout << "   🎵 Duration: " << duration << " seconds" << std::endl;
+        std::cout << "   📦 Audio data starts at offset: " << streamInfo.data_offset << std::endl;
+        
+        return true;
+    }
+
+} // namespace tremor::taffy::tools

@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(Taffy VERSION 0.1.0 LANGUAGES CXX)
 
+# Guard against multiple inclusion
+if(TARGET Taffy)
+    return()
+endif()
+
 # Add custom module path for finding packages
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 

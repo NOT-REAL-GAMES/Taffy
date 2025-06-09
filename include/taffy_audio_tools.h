@@ -114,4 +114,22 @@ namespace tremor::taffy::tools {
      */
     bool createBitcrushedImportAsset(const std::string& output_path);
 
+    /**
+     * Create a streaming audio TAF from a large audio file
+     * @param inputWavPath Path to input WAV file
+     * @param outputPath Path to save the .taf file
+     * @param chunkSizeMs Chunk size in milliseconds (default 1 second)
+     * @return true if successful
+     */
+    bool createStreamingAudioAsset(const std::string& inputWavPath,
+                                   const std::string& outputPath,
+                                   uint32_t chunkSizeMs = 1000);
+
+    /**
+     * Create a test streaming audio TAF with generated sine wave
+     * @param outputPath Path to save the .taf file
+     * @return true if successful
+     */
+    bool createStreamingTestAsset(const std::string& outputPath);
+
 } // namespace tremor::taffy::tools
