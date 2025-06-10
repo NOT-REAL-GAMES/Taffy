@@ -70,6 +70,7 @@ add_library(Taffy STATIC
     include/tools.cpp  
     taffy_audio_tools.cpp  # Audio tools
     taffy_font_tools.cpp   # SDF font tools
+    taffy_streaming.cpp    # Streaming TAF support
 )
 
 # Create Taffy compiler executable (uses Taffy.cpp which has main)

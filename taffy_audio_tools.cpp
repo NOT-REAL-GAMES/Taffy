@@ -1944,13 +1944,21 @@ bool createStreamingAudioAsset(const std::string& inputWavPath,
     std::ifstream wavFile(inputWavPath, std::ios::binary);
     wavFile.seekg(dataOffset);
     
-    // For streaming audio, we DON'T read the actual audio data into the TAF
-    // The audio data stays in the WAV file and is streamed on demand
+    // Read and embed the entire audio data into the TAF file
+    std::vector<uint8_t> audioData(dataSize);
+    wavFile.read(reinterpret_cast<char*>(audioData.data()), dataSize);
+    if (!wavFile) {
+        std::cerr << "❌ Failed to read audio data from WAV file" << std::endl;
+        return false;
+    }
     wavFile.close();
     
-    std::cout << "📊 Streaming TAF will reference WAV file: " << inputWavPath << std::endl;
-    std::cout << "📊 Audio data size: " << (dataSize / (1024.0 * 1024.0)) << " MB (not included in TAF)" << std::endl;
-    std::cout << "📊 Metadata size: " << audioChunkData.size() << " bytes" << std::endl;
+    // Append the audio data to the chunk
+    audioChunkData.insert(audioChunkData.end(), audioData.begin(), audioData.end());
+    
+    std::cout << "📊 Embedded " << dataSize << " bytes of audio data into TAF" << std::endl;
+    std::cout << "📊 Audio data size: " << (dataSize / (1024.0 * 1024.0)) << " MB (included in TAF)" << std::endl;
+    std::cout << "📊 Total TAF chunk size: " << audioChunkData.size() << " bytes" << std::endl;
     
     // Add audio chunk to asset
     asset.add_chunk(Taffy::ChunkType::AUDI, audioChunkData, "streaming_audio");
