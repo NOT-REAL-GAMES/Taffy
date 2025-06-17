@@ -67,7 +67,7 @@ namespace tremor::taffy::tools {
     using namespace Taffy;
     
     Overlay overlay;
-    overlay.add_target_asset("assets/fixed_triangle.taf", "^1.0.0");  // Target the correct triangle asset
+    overlay.add_target_asset("assets/cube.taf", "^1.0.0");  // Target the cube asset
     
     // Create a simple hot pink fragment shader
     std::string hotPinkFragShader = R"(
@@ -896,12 +896,23 @@ void main() {
                 shader << "    \n";
                 shader << "    // Reconstruct int64 values and convert to float\n";
                 shader << "    // Note: This assumes the values fit in float range\n";
-                shader << "    float x = float(int(x_lo)) + float(int(x_hi)) * 4294967296.0;\n";
-                shader << "    float y = float(int(y_lo)) + float(int(y_hi)) * 4294967296.0;\n";
-                shader << "    float z = float(int(z_lo)) + float(int(z_hi)) * 4294967296.0;\n";
+                shader << "    double x = float(int(x_hi)) + float(int(x_lo)) * 4294967296.0;\n";
+                shader << "    double y = float(int(y_hi)) + float(int(y_lo)) * 4294967296.0;\n";
+                shader << "    double z = float(int(z_hi)) + float(int(z_lo)) * 4294967296.0;\n";
                 shader << "    \n";
-                shader << "    // Convert from quantized units (1/128mm) to world units\n";
-                shader << "    return vec3(x / 128000.0, y / 128000.0, z / 128000.0);\n";
+                shader << "    // Convert from quantized units to world units\n";
+                shader << "    vec3 result = vec3(x / 1280000000000.0, y / 1280000000000.0, z / 1280000000000.0);\n";
+                shader << "    \n";
+
+                shader << "    \n";
+                shader << "    // Debug: Store vertex positions for debugging\n";
+                shader << "    // We'll use the color output to encode position information\n";
+                shader << "    if (vertexIndex < 3u) {\n";
+                shader << "        // Encode the world-space position in the color for the first 3 vertices\n";
+                shader << "        // This will help us debug where the vertices actually are\n";
+                shader << "    }\n";
+                shader << "    \n";
+                shader << "    return result;\n";
                 shader << "}\n\n";
                 
                 // Index reader function
@@ -923,30 +934,28 @@ void main() {
                 shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << "u);\n\n";
 
                 shader << "    SetMeshOutputsEXT(vertex_count, primitive_count);\n\n";
+                
+                shader << "    // Debug: Check center of mass of vertices\n";
+                shader << "    vec3 centerOfMass = vec3(0.0);\n\n";
 
                 if (config.prefersCompactVertexOutput) {
-                    // Hardcode simple triangle with per-vertex colors
-                    shader << "    // Compact vertex output - hardcoded triangle\n";
-                    shader << "    gl_MeshVerticesEXT[0].gl_Position = pc.mvp * vec4(-0.5, -0.5, 0.0, 1.0);\n";
-                    shader << "    gl_MeshVerticesEXT[1].gl_Position = pc.mvp * vec4( 0.5, -0.5, 0.0, 1.0);\n";
-                    shader << "    gl_MeshVerticesEXT[2].gl_Position = pc.mvp * vec4( 0.0,  0.5, 0.0, 1.0);\n";
-                    shader << "    \n";
-                    shader << "    // Base colors for the triangle\n";
-                    shader << "    vec4 baseColors[3] = vec4[3](\n";
-                    shader << "        vec4(1.0, 1.0, 0.0, 1.0), // Yellow\n";
-                    shader << "        vec4(1.0, 0.0, 1.0, 1.0), // Magenta\n";
-                    shader << "        vec4(1.0, 0.0, 0.0, 1.0)  // Red\n";
-                    shader << "    );\n";
-                    shader << "    \n";
-                    
-                    shader << "    // Set colors directly\n";
-                    shader << "    color[0] = baseColors[0];\n";
-                    shader << "    color[1] = baseColors[1];\n";
-                    shader << "    color[2] = baseColors[2];\n";
+                    // Read vertices from buffer instead of hardcoding
+                    shader << "    // Read vertices from buffer and transform them\n";
+                    shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
+                    generateVertexProcessing(shader, config.attributes);
+                    shader << "    }\n\n";
                     
                     shader << "    \n";
-                    shader << "    // Set triangle indices\n";
-                    shader << "    gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);\n";
+                    shader << "    // Debug: Override colors to show cube structure\n";
+                    shader << "    // Make vertex 7 (should be back-top-right) bright white\n";
+                    shader << "    color[7] = vec4(1.0, 1.0, 1.0, 1.0);\n";
+                    shader << "    // Make vertex 2 (should be front-top-right) bright yellow\n";
+                    shader << "    color[2] = vec4(1.0, 1.0, 0.0, 1.0);\n";
+                    shader << "    // Make vertex 16 (should be right face, bottom-front) bright magenta\n";
+                    shader << "    color[16] = vec4(1.0, 0.0, 1.0, 1.0);\n\n";
+                    
+                    // Generate primitives based on indices
+                    generatePrimitiveGeneration(shader, config);
                 } else {
                     // Generate vertices from buffer
                     shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
@@ -1169,6 +1178,14 @@ void main() {
                         else {
                             shader << "        vec3 position = read_" << attr.name << "(i);\n";
                         }
+                        shader << "        // Debug: Color vertices based on their Y position\n";
+                        shader << "        // Vertices with Y > 0.01 should be colored differently\n";
+                        shader << "        if (position.y > 0.01) {\n";
+                        shader << "            // This vertex has elevated Y position - make it cyan\n";
+                        shader << "            color[i] = vec4(0.0, 1.0, 1.0, 1.0);\n";
+                        shader << "        }\n";
+                        shader << "        // Store the untransformed position for debugging\n";
+                        shader << "        centerOfMass += position;\n";
                         shader << "        gl_MeshVerticesEXT[i].gl_Position = pc.mvp * vec4(position, 1.0);\n\n";
                     }
                     else {
@@ -1246,11 +1263,11 @@ void main() {
 
             // Create a data-driven mesh shader asset
         bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path) {
-            std::cout << "🚀 Creating data-driven mesh shader triangle with Vec3Q support..." << std::endl;
+            std::cout << "🚀 Creating data-driven mesh shader cube with Vec3Q support..." << std::endl;
 
             Asset asset;
             asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
-            asset.set_description("Triangle with Vec3Q positions and data-driven mesh shader");
+            asset.set_description("Cube with Vec3Q positions and data-driven mesh shader");
             asset.set_feature_flags(FeatureFlags::QuantizedCoords |
                 FeatureFlags::MeshShaders |
                 FeatureFlags::EmbeddedShaders |
@@ -1270,33 +1287,75 @@ void main() {
 #pragma pack(pop)
 
             std::vector<Vertex> vertices = {
-                // Top vertex - Yellow
-                {Vec3Q{0, 64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.5f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}},
-                // Bottom left - Magenta  
-                {Vec3Q{-64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}},
-                // Bottom right - Red
-                {Vec3Q{64000, -64000, 0}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.0f}}
+                // Front face - Red (4 vertices) - Making cube 10cm (0.1m) instead of 50cm
+                {Vec3Q{-128, -128,  128}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128, -128,  128}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128,  144,  128}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-128,  128,  128}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                
+                // Back face - Green (4 vertices)
+                {Vec3Q{ 128, -128, -128}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-128, -128, -128}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-128,  128, -128}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128,  128, -128}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                
+                // Top face - Blue (4 vertices)
+                {Vec3Q{-128,  128,  128}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128,  144,  128}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128,  128, -128}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-128,  128, -128}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                
+                // Bottom face - Yellow (4 vertices)
+                {Vec3Q{-128, -128, -128}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128, -128, -128}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 128, -128,  128}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-128, -128,  128}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                
+                // Right face - Magenta (4 vertices)
+                {Vec3Q{ 128, -128,  128}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 128, -128, -128}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 128,  128, -128}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 128,  144,  128}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                
+                // Left face - Cyan (4 vertices)
+                {Vec3Q{-128, -128, -128}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+                {Vec3Q{-128, -128,  128}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+                {Vec3Q{-128,  128,  128}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+                {Vec3Q{-128,  128, -128}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}}
             };
 
             // Create geometry chunk with mesh shader configuration  
             GeometryChunk geom_header{};
             geom_header.vertex_count = static_cast<uint32_t>(vertices.size());
-            // Add indices for indexed mesh shader support
-            std::vector<uint32_t> indices = {0, 1, 2};
+            // Add indices for cube (6 faces * 2 triangles * 3 vertices = 36 indices)
+            std::vector<uint32_t> indices = {
+                // Front face
+                0, 1, 2,    0, 2, 3,
+                // Back face
+                4, 5, 6,    4, 6, 7,
+                // Top face
+                8, 9, 10,   8, 10, 11,
+                // Bottom face
+                12, 13, 14, 12, 14, 15,
+                // Right face
+                16, 17, 18, 16, 18, 19,
+                // Left face
+                20, 21, 22, 20, 22, 23
+            };
             geom_header.index_count = static_cast<uint32_t>(indices.size());
             geom_header.vertex_stride = sizeof(Vertex);
             std::cout << "DEBUG: Vertex struct size is " << sizeof(Vertex) << " bytes" << std::endl;
             geom_header.vertex_format = VertexFormat::Position3D | VertexFormat::Normal |
                 VertexFormat::Color | VertexFormat::TexCoord0 | VertexFormat::Tangent;
-            geom_header.bounds_min = Vec3Q{ -500, -500, 0 };
-            geom_header.bounds_max = Vec3Q{ 500, 500, 0 };
+            geom_header.bounds_min = Vec3Q{ -0, -0, -0 };
+            geom_header.bounds_max = Vec3Q{ 0, 0, 0 };
             geom_header.lod_distance = 1000.0f;
             geom_header.lod_level = 0;
 
             // Mesh shader configuration
             geom_header.render_mode = GeometryChunk::MeshShader;
-            geom_header.ms_max_vertices = 3;
-            geom_header.ms_max_primitives = 1;
+            geom_header.ms_max_vertices = 24;
+            geom_header.ms_max_primitives = 12;
             geom_header.ms_workgroup_size[0] = 1;
             geom_header.ms_workgroup_size[1] = 1;
             geom_header.ms_workgroup_size[2] = 1;
@@ -1322,7 +1381,7 @@ void main() {
             // Copy index data
             std::memcpy(geom_data.data() + offset, indices.data(), index_data_size);
 
-            asset.add_chunk(ChunkType::GEOM, geom_data, "vec3q_triangle_geometry");
+            asset.add_chunk(ChunkType::GEOM, geom_data, "vec3q_cube_geometry");
 
             // Generate shaders based on the geometry
             MeshShaderGenerator::ShaderConfig config;
@@ -1339,13 +1398,13 @@ void main() {
             config.prefersCompactVertexOutput = true; // Use compact output for simplicity
             config.supportsOverlays = true; // Enable overlay support
 
-            // Define vertex attributes with correct offsets matching OverlayVertex structure
+            // Define vertex attributes with correct offsets matching Vertex structure
             config.attributes = {
                 {VertexAttribute::Vec3Q, 0, 0, "position"},   // offset 0 bytes
                 {VertexAttribute::Float3, 24, 1, "normal"},   // offset 24 bytes
-                {VertexAttribute::Float2, 36, 2, "uv"},       // offset 36 bytes (UV comes BEFORE color!)
-                {VertexAttribute::Float4, 44, 3, "color"}     // offset 44 bytes
-                // No tangent in OverlayVertex structure
+                {VertexAttribute::Float4, 36, 2, "color"},    // offset 36 bytes
+                {VertexAttribute::Float2, 52, 3, "uv"},       // offset 52 bytes
+                {VertexAttribute::Float4, 60, 4, "tangent"}   // offset 60 bytes
             };
 
             // Generate shaders
@@ -1391,9 +1450,10 @@ void main() {
                 return false;
             }
 
-            std::cout << "✅ Vec3Q data-driven mesh shader asset created!" << std::endl;
+            std::cout << "✅ Vec3Q data-driven mesh shader cube created!" << std::endl;
             std::cout << "   📁 File: " << output_path << std::endl;
-            std::cout << "   📊 Vertices: " << vertices.size() << std::endl;
+            std::cout << "   📊 Vertices: " << vertices.size() << " (cube with 6 faces)" << std::endl;
+            std::cout << "   📊 Triangles: " << indices.size() / 3 << std::endl;
             std::cout << "   🎯 Vertex stride: " << sizeof(Vertex) << " bytes" << std::endl;
             std::cout << "   🔧 Push constant stride: " << sizeof(Vertex) / sizeof(float) << " floats" << std::endl;
 
@@ -1428,8 +1488,8 @@ void main() {
                 mesh_info.entry_point_hash = main_hash;
                 mesh_info.stage = ShaderChunk::Shader::ShaderStage::MeshShader;
                 mesh_info.spirv_size = static_cast<uint32_t>(mesh_spirv_bytes);
-                mesh_info.max_vertices = 3;
-                mesh_info.max_primitives = 1;
+                mesh_info.max_vertices = 24;
+                mesh_info.max_primitives = 12;
                 mesh_info.workgroup_size[0] = 1;
                 mesh_info.workgroup_size[1] = 1;
                 mesh_info.workgroup_size[2] = 1;

@@ -49,6 +49,7 @@ int main(int argc, char* argv[]) {
 	std::string outMaster = argv[1];
 	std::string outOverlay = argv[2];
 	std::string outFont = argv[3];
+	//std::string outCube = argv[4];
 	std::string audioDir = (argc > 4) ? argv[4] : "assets/audio";
 
 	Taffy::Asset ass;
