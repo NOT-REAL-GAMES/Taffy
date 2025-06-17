@@ -6,10 +6,10 @@
 #pragma pack(push, 1)
 
 struct Vec3Q {
-    int64_t x, y, z;
+    uint64_t x, y, z;
 
     Vec3Q() : x(0), y(0), z(0) {}
-    Vec3Q(int64_t x, int64_t y, int64_t z) : x(x), y(y), z(z) {}
+    Vec3Q(int64_t x, int64_t y, int64_t z) : x(x+9223372036854775808ULL), y(y+9223372036854775808ULL), z(z+9223372036854775808ULL) {}
 
     // Conversion from floating point to quantized
     static Vec3Q fromFloat(const glm::vec3& v) {
