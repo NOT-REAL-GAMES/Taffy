@@ -26,10 +26,11 @@ struct Vec3Q {
     // Conversion from quantized to floating point
     glm::vec3 toFloat() const {
         constexpr double invScale = 1.0 / 128000.0;
+        constexpr uint64_t offset = 9223372036854775808ULL;
         return glm::vec3(
-            static_cast<float>(x * invScale),
-            static_cast<float>(y * invScale),
-            static_cast<float>(z * invScale)
+            static_cast<float>(static_cast<int64_t>(x - offset) * invScale),
+            static_cast<float>(static_cast<int64_t>(y - offset) * invScale),
+            static_cast<float>(static_cast<int64_t>(z - offset) * invScale)
         );
     }
 

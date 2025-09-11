@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Taffy: The Web 3.0 Interactive Asset Format
  * Version 0.1 - Foundation Implementation
  *

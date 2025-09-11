@@ -198,7 +198,12 @@ if(SPIRVCross_FOUND)
 endif()
 
 # Set compile features
-target_compile_features(Taffy PUBLIC cxx_std_20)
+target_compile_features(Taffy PUBLIC cxx_std_23)
+
+# Ensure proper C++23 support with explicit flags
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(Taffy PUBLIC -std=c++23)
+endif()
 
 # Define USE_SHADERC if we have it
 if(SHADERC_FOUND)

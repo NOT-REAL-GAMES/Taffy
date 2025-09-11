@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Taffy Overlay Creation Tools and Example Overlays
  * Helper utilities for creating overlays programmatically
  */
