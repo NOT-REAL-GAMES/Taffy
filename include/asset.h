@@ -63,8 +63,8 @@ namespace Taffy {
     // =============================================================================
 
     void Asset::add_chunk(ChunkType type, const std::vector<uint8_t>& data, const std::string& name) {
-        // Store chunk data
-        chunk_data_[type] = data;
+        // Store chunk data at the same index as directory entry
+        chunk_data_.push_back(data);
 
         // Create directory entry
         ChunkDirectoryEntry entry{};
@@ -84,13 +84,19 @@ namespace Taffy {
     }
 
     bool Asset::has_chunk(ChunkType type) const {
-        return chunk_data_.find(type) != chunk_data_.end();
+        for (const auto& entry : chunk_directory_) {
+            if (entry.type == type) {
+                return true;
+            }
+        }
+        return false;
     }
 
     std::optional<std::vector<uint8_t>> Asset::get_chunk_data(ChunkType type) const {
-        auto it = chunk_data_.find(type);
-        if (it != chunk_data_.end()) {
-            return it->second;
+        for (size_t i = 0; i < chunk_directory_.size(); ++i) {
+            if (chunk_directory_[i].type == type) {
+                return chunk_data_[i];
+            }
         }
         return std::nullopt;
     }
@@ -101,8 +107,8 @@ namespace Taffy {
 
     std::vector<ChunkType> Asset::get_chunk_types() const {
         std::vector<ChunkType> types;
-        for (const auto& [type, data] : chunk_data_) {
-            types.push_back(type);
+        for (const auto& entry : chunk_directory_) {
+            types.push_back(entry.type);
         }
         return types;
     }
@@ -140,11 +146,9 @@ namespace Taffy {
         }
 
         // Write chunk data
-        for (const auto& entry : chunk_directory_) {
-            auto it = chunk_data_.find(entry.type);
-            if (it != chunk_data_.end()) {
-                file.write(reinterpret_cast<const char*>(it->second.data()), it->second.size());
-            }
+        for (size_t i = 0; i < chunk_directory_.size(); ++i) {
+            const auto& data = chunk_data_[i];
+            file.write(reinterpret_cast<const char*>(data.data()), data.size());
         }
 
         file.close();
@@ -280,7 +284,7 @@ namespace Taffy {
                 return false;
             }
 
-            chunk_data_[entry.type] = std::move(data);
+            chunk_data_.push_back(std::move(data));
             std::cout << "  📦 Loaded chunk: " << entry.name << " (" << entry.size << " bytes)" << std::endl;
         }
 
@@ -329,28 +333,20 @@ namespace Taffy {
     }
 
     bool Asset::remove_chunk(ChunkType type) {
-        auto data_it = chunk_data_.find(type);
-        if (data_it == chunk_data_.end()) {
-            return false; // Chunk doesn't exist
+        // Find the first chunk of the given type
+        for (size_t i = 0; i < chunk_directory_.size(); ++i) {
+            if (chunk_directory_[i].type == type) {
+                std::cout << "  🗑️ Removed chunk: " << chunk_directory_[i].name << std::endl;
+
+                // Remove from both vectors at the same index
+                chunk_directory_.erase(chunk_directory_.begin() + i);
+                chunk_data_.erase(chunk_data_.begin() + i);
+
+                header_.chunk_count = static_cast<uint32_t>(chunk_directory_.size());
+                return true;
+            }
         }
-
-        // Remove from chunk data
-        chunk_data_.erase(data_it);
-
-        // Remove from chunk directory
-        auto dir_it = std::find_if(chunk_directory_.begin(), chunk_directory_.end(),
-            [type](const ChunkDirectoryEntry& entry) {
-                return entry.type == type;
-            });
-
-        if (dir_it != chunk_directory_.end()) {
-            std::cout << "  🗑️ Removed chunk: " << dir_it->name << std::endl;
-            chunk_directory_.erase(dir_it);
-            header_.chunk_count = static_cast<uint32_t>(chunk_directory_.size());
-            return true;
-        }
-
-        return false;
+        return false; // Chunk doesn't exist
     }
 
     uint64_t Asset::get_file_size() const {
@@ -359,7 +355,7 @@ namespace Taffy {
         uint64_t size = sizeof(AssetHeader);
         size += chunk_directory_.size() * sizeof(ChunkDirectoryEntry);
 
-        for (const auto& [type, data] : chunk_data_) {
+        for (const auto& data : chunk_data_) {
             size += data.size();
         }
 

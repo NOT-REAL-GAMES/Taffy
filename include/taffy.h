@@ -500,7 +500,7 @@ namespace Taffy {
         private:
             AssetHeader header_;
             std::vector<ChunkDirectoryEntry> chunk_directory_;
-            std::unordered_map<ChunkType, std::vector<uint8_t>> chunk_data_;
+            std::vector<std::vector<uint8_t>> chunk_data_;
 
         public:
             inline Asset();

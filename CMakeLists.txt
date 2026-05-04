@@ -12,6 +12,40 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 # Try to find SPIRV-Cross
 find_package(SPIRVCross QUIET)
 
+include(FetchContent)
+
+FetchContent_Declare(
+    SPIRV-Cross
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
+    GIT_TAG main
+)
+
+FetchContent_MakeAvailable(SPIRV-Cross)
+
+FetchContent_Declare(
+    SPIRV-Headers
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
+    GIT_TAG main
+)
+
+FetchContent_MakeAvailable(SPIRV-Headers)
+
+FetchContent_Declare(
+    SPIRV-Tools
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
+    GIT_TAG main
+)
+
+FetchContent_MakeAvailable(SPIRV-Tools)
+
+FetchContent_Declare(
+    glslang
+    GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+    GIT_TAG main
+)
+
+FetchContent_MakeAvailable(glslang)
+
 # If not found via find_package, try to locate it manually in Vulkan SDK
 if(NOT SPIRVCross_FOUND)
     if(DEFINED ENV{VULKAN_SDK})
@@ -57,17 +91,11 @@ if(NOT SPIRVCross_FOUND)
     endif()
 endif()
 
-# Make SPIRV-Cross optional - disable transpilation features if not found
-if(NOT SPIRVCross_FOUND)
-    message(WARNING "SPIRV-Cross not found. Shader transpilation features will be disabled.")
-    message(WARNING "To enable transpilation, install SPIRV-Cross or ensure Vulkan SDK is properly installed.")
-    set(SPIRV_CROSS_INCLUDE_DIRS "")
-    set(SPIRV_CROSS_LIBRARIES "")
-endif()
+
 
 # Create Taffy library WITHOUT the main function
 add_library(Taffy STATIC
-    include/tools.cpp  
+    include/tools.cpp
     taffy_audio_tools.cpp  # Audio tools
     taffy_font_tools.cpp   # SDF font tools
     taffy_streaming.cpp    # Streaming TAF support
@@ -79,7 +107,18 @@ add_executable(taffy_compiler
 )
 
 # Link the compiler with the Taffy library
-target_link_libraries(taffy_compiler PRIVATE Taffy)
+target_link_libraries(taffy_compiler PRIVATE Taffy     
+    shaderc
+    spirv-cross-core
+    spirv-cross-glsl
+    spirv-cross-c
+    spirv-cross-cpp
+    spirv-cross-hlsl
+    spirv-cross-msl
+    SPIRV-Headers
+    SPIRV-Tools
+    glslang::glslang
+)
 
 # Create RGB test triangle generator (commented out - file doesn't exist)
 # add_executable(create_test_rgb_triangle
@@ -141,14 +180,35 @@ endif()
 
 # Link with shaderc libraries if found
 if(SHADERC_FOUND)
-    target_link_libraries(taffy_compiler PRIVATE ${SHADERC_LIBS})
-    target_link_libraries(Taffy PUBLIC ${SHADERC_LIBS})
+#    target_link_libraries(taffy_compiler PRIVATE ${SHADERC_LIBS})
+#    target_link_libraries(Taffy PUBLIC ${SHADERC_LIBS})
 endif()
 
 # Link with SPIRV-Cross if found
 if(SPIRVCross_FOUND)
     target_link_libraries(taffy_compiler PRIVATE ${SPIRV_CROSS_LIBRARIES})
     target_link_libraries(Taffy PUBLIC ${SPIRV_CROSS_LIBRARIES})
+endif()
+
+# Check if AssImp is available (fetched by parent project)
+if(TARGET assimp)
+    target_link_libraries(taffy_compiler PRIVATE assimp)
+    target_link_libraries(Taffy PUBLIC assimp)
+    target_compile_definitions(Taffy PRIVATE HAS_ASSIMP)
+    target_compile_definitions(taffy_compiler PRIVATE HAS_ASSIMP)
+    message(STATUS "Found AssImp target - GLTF import support enabled")
+else()
+    # Try to find it via find_package
+    find_package(assimp QUIET)
+    if(assimp_FOUND)
+        #target_link_libraries(taffy_compiler PRIVATE assimp::assimp)
+        target_link_libraries(Taffy PUBLIC assimp::assimp)
+        target_compile_definitions(Taffy PRIVATE HAS_ASSIMP)
+        #target_compile_definitions(taffy_compiler PRIVATE HAS_ASSIMP)
+        message(STATUS "Found AssImp via find_package - GLTF import support enabled")
+    else()
+        message(WARNING "AssImp not found - GLTF import support disabled")
+    endif()
 endif()
 
 # target_link_libraries(create_test_rgb_triangle PRIVATE
@@ -163,15 +223,15 @@ endif()
 # )
 
 # Set include directories for compiler
-target_include_directories(taffy_compiler PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+#target_include_directories(taffy_compiler PRIVATE
+#    ${CMAKE_CURRENT_SOURCE_DIR}/include
+#    ${CMAKE_CURRENT_SOURCE_DIR}
+#)
 
 # Add SPIRV-Cross includes if found
-if(SPIRVCross_FOUND)
-    target_include_directories(taffy_compiler PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
-endif()
+#if(SPIRVCross_FOUND)
+#    target_include_directories(taffy_compiler PRIVATE ${SPIRV_CROSS_INCLUDE_DIRS})
+#endif()
 
 # target_include_directories(create_test_rgb_triangle PRIVATE
 #     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -189,6 +249,8 @@ endif()
 target_include_directories(Taffy PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../build/_deps/spirv-cross-src
+
 )
 
 # Add SPIRV-Cross if found
@@ -200,14 +262,14 @@ endif()
 # Set compile features
 target_compile_features(Taffy PUBLIC cxx_std_23)
 
-# Ensure proper C++23 support with explicit flags
+# Ensure proper C++23 support with explicit flags for C++ files only
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(Taffy PUBLIC -std=c++23)
+    target_compile_options(Taffy PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-std=c++23>)
 endif()
 
 # Define USE_SHADERC if we have it
 if(SHADERC_FOUND)
-    target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
+#    target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
     target_compile_definitions(Taffy PRIVATE USE_SHADERC)
 endif()
 
@@ -217,9 +279,9 @@ if(SPIRVCross_FOUND)
 endif()
 
 # Set output directory for executables
-set_target_properties(taffy_compiler PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-)
+#set_target_properties(taffy_compiler PROPERTIES
+#    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+#)
 # set_target_properties(create_test_rgb_triangle PROPERTIES
 #     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 # )
@@ -288,7 +350,7 @@ endif()
 if(SDL2_FOUND)
     message(STATUS "SDL2 found - graphical editor features will be available")
     target_compile_definitions(Taffy PRIVATE HAS_SDL2)
-    target_compile_definitions(taffy_compiler PRIVATE HAS_SDL2)
+#    target_compile_definitions(taffy_compiler PRIVATE HAS_SDL2)
 else()
     message(STATUS "SDL2 not found - graphical editor features will be disabled")
 endif()
