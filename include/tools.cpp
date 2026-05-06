@@ -1367,15 +1367,27 @@ void main() {
         // =============================================================================
 
             // Create a data-driven mesh shader asset
-        bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path) {
-            std::cout << "🚀 Creating data-driven cube with non-mesh fallback shaders..." << std::endl;
-
+        bool DataDrivenAssetCompiler::createDataDrivenTriangle(const std::string& output_path, bool mesh) {
             Asset asset;
-            asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
-            asset.set_description("Cube with Vec3Q positions and data-driven traditional shader pipeline");
-            asset.set_feature_flags(FeatureFlags::QuantizedCoords |
-                FeatureFlags::EmbeddedShaders |
-                FeatureFlags::HashBasedNames);
+            if (mesh){
+                std::cout << "🚀 Creating data-driven mesh shader cube with Vec3Q support..." << std::endl;
+
+                asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
+                asset.set_description("Cube with Vec3Q positions and data-driven mesh shader");
+                asset.set_feature_flags(FeatureFlags::QuantizedCoords |
+                    FeatureFlags::MeshShaders |
+                    FeatureFlags::EmbeddedShaders |
+                    FeatureFlags::HashBasedNames);
+            } else {
+                std::cout << "🚀 Creating data-driven cube with non-mesh fallback shaders..." << std::endl;
+
+                asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
+                asset.set_description("Cube with Vec3Q positions and data-driven traditional shader pipeline");
+                asset.set_feature_flags(FeatureFlags::QuantizedCoords |
+                    FeatureFlags::EmbeddedShaders |
+                    FeatureFlags::HashBasedNames);
+
+            }
 
 #pragma pack(push, 1)
  
@@ -1457,7 +1469,7 @@ void main() {
             geom_header.lod_level = 0;
 
             // Traditional rendering configuration for non-mesh shader systems
-            geom_header.render_mode = GeometryChunk::Traditional;
+            geom_header.render_mode = mesh ? GeometryChunk::MeshShader : GeometryChunk::Traditional;
             geom_header.ms_max_vertices = 24;
             geom_header.ms_max_primitives = 12;
             geom_header.ms_workgroup_size[0] = 1;
@@ -1511,41 +1523,82 @@ void main() {
                 {VertexAttribute::Float4, 60, 4, "tangent"}   // offset 60 bytes
             };
 
-            // Generate fallback shaders
-            std::string vertex_shader_glsl = MeshShaderGenerator::generateVertexShader(config);
-            std::string frag_shader_glsl = MeshShaderGenerator::generateTraditionalFragmentShader(config);
 
-            std::cout << "📝 Generated traditional vertex/fragment shaders with Vec3Q support" << std::endl;
+            if (mesh) {
+                std::string mesh_shader_glsl = MeshShaderGenerator::generateMeshShader(config);
+                std::string frag_shader_glsl = MeshShaderGenerator::generateFragmentShader(config);
 
-            // Log key info
-            std::cout << "📊 Vertex layout:" << std::endl;
-            std::cout << "   Position (Vec3Q): offset 0, size 24 bytes" << std::endl;
-            std::cout << "   Normal (vec3): offset 24, size 12 bytes" << std::endl;
-            std::cout << "   Color (vec4): offset 36, size 16 bytes" << std::endl;
-            std::cout << "   UV (vec2): offset 52, size 8 bytes" << std::endl;
-            std::cout << "   Tangent (vec4): offset 60, size 16 bytes (xyz=tangent, w=handedness)" << std::endl;
-            std::cout << "   Total vertex size: " << sizeof(Vertex) << " bytes ("
-                << sizeof(Vertex) / sizeof(float) << " floats)" << std::endl;
+                tremor::taffy::tools::TaffyAssetCompiler compiler;
+                auto mesh_spirv = compiler.compileGLSLToSpirv(mesh_shader_glsl, shaderc_mesh_shader, "vec3q_mesh_shader");
+                auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "vec3q_fragment_shader");
+
+                if (mesh_spirv.empty() || frag_spirv.empty()) {
+                    std::cerr << "❌ Shader compilation failed!" << std::endl;
+                    return false;
+                }
+
+                // Create shader chunk
+                if (!createDataDrivenMeshShaderChunk(asset, mesh_spirv, frag_spirv,
+                        geom_header.ms_max_vertices,
+                        geom_header.ms_max_primitives,
+                        geom_header.ms_workgroup_size)) {
+                    return false;
+                }
+                
+                if (!createBasicMaterialChunk(asset)) {
+                    return false;
+                }
+                
+                std::cout << "✅ Vec3Q data-driven mesh shader cube created!" << std::endl;
+                
+                std::cout << "   📁 File: " << output_path << std::endl;
+                std::cout << "   📊 Vertices: " << vertices.size() << " (cube with 6 faces)" << std::endl;
+                std::cout << "   📊 Triangles: " << indices.size() / 3 << std::endl;
+                std::cout << "   🎯 Vertex stride: " << sizeof(Vertex) << " bytes" << std::endl;
+                std::cout << "   🔧 Push constant stride: " << sizeof(Vertex) / sizeof(float) << " floats" << std::endl;
+
+            }else {
+                // Generate fallback shaders
+                std::string vertex_shader_glsl = MeshShaderGenerator::generateVertexShader(config);
+                std::string frag_shader_glsl = MeshShaderGenerator::generateTraditionalFragmentShader(config);
+
+                tremor::taffy::tools::TaffyAssetCompiler compiler;
+                auto vertex_spirv = compiler.compileGLSLToSpirv(vertex_shader_glsl, shaderc_vertex_shader, "vec3q_vertex_shader");
+                auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "vec3q_fragment_shader");
+
+                if (vertex_spirv.empty() || frag_spirv.empty()) {
+                    std::cerr << "❌ Shader compilation failed!" << std::endl;
+                    return false;
+                }
+
+                // Create shader chunk
+                if (!createDataDrivenShaderChunk(asset, vertex_spirv, frag_spirv)) {
+                    return false;
+                }
+
+                // Create material chunk
+                if (!createBasicMaterialChunk(asset)) {
+                    return false;
+                }
+
+                std::cout << "📝 Generated traditional vertex/fragment shaders with Vec3Q support" << std::endl;
+
+                // Log key info
+                std::cout << "📊 Vertex layout:" << std::endl;
+                std::cout << "   Position (Vec3Q): offset 0, size 24 bytes" << std::endl;
+                std::cout << "   Normal (vec3): offset 24, size 12 bytes" << std::endl;
+                std::cout << "   Color (vec4): offset 36, size 16 bytes" << std::endl;
+                std::cout << "   UV (vec2): offset 52, size 8 bytes" << std::endl;
+                std::cout << "   Tangent (vec4): offset 60, size 16 bytes (xyz=tangent, w=handedness)" << std::endl;
+                std::cout << "   Total vertex size: " << sizeof(Vertex) << " bytes ("
+                    << sizeof(Vertex) / sizeof(float) << " floats)" << std::endl;
+
+            }
+
+
 
             // Compile shaders
-            tremor::taffy::tools::TaffyAssetCompiler compiler;
-            auto vertex_spirv = compiler.compileGLSLToSpirv(vertex_shader_glsl, shaderc_vertex_shader, "vec3q_vertex_shader");
-            auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "vec3q_fragment_shader");
 
-            if (vertex_spirv.empty() || frag_spirv.empty()) {
-                std::cerr << "❌ Shader compilation failed!" << std::endl;
-                return false;
-            }
-
-            // Create shader chunk
-            if (!createDataDrivenShaderChunk(asset, vertex_spirv, frag_spirv)) {
-                return false;
-            }
-
-            // Create material chunk
-            if (!createBasicMaterialChunk(asset)) {
-                return false;
-            }
 
             // Save asset
             std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
@@ -1831,6 +1884,62 @@ void main() {
                 std::memcpy(shader_data.data() + offset, frag_spirv.data(), frag_spirv_bytes);
 
                 asset.add_chunk(ChunkType::SHDR, shader_data, "data_driven_shaders");
+                return true;
+            }
+
+            bool DataDrivenAssetCompiler::createDataDrivenMeshShaderChunk(Asset& asset,
+                const std::vector<uint32_t>& mesh_spirv,
+                const std::vector<uint32_t>& frag_spirv,
+                uint32_t max_vertices,
+                uint32_t max_primitives,
+                const uint32_t workgroup_size[3]) {
+                using namespace Taffy;
+
+                uint64_t mesh_name_hash = HashRegistry::register_and_hash("data_driven_mesh_shader");
+                uint64_t frag_name_hash = HashRegistry::register_and_hash("data_driven_fragment_shader");
+                uint64_t main_hash = HashRegistry::register_and_hash("main");
+
+                size_t mesh_spirv_bytes = mesh_spirv.size() * sizeof(uint32_t);
+                size_t frag_spirv_bytes = frag_spirv.size() * sizeof(uint32_t);
+                size_t total_size = sizeof(ShaderChunk) + 2 * sizeof(ShaderChunk::Shader) +
+                    mesh_spirv_bytes + frag_spirv_bytes;
+
+                std::vector<uint8_t> shader_data(total_size);
+                size_t offset = 0;
+
+                ShaderChunk header{};
+                header.shader_count = 2;
+                std::memcpy(shader_data.data() + offset, &header, sizeof(header));
+                offset += sizeof(header);
+
+                ShaderChunk::Shader mesh_info{};
+                mesh_info.name_hash = mesh_name_hash;
+                mesh_info.entry_point_hash = main_hash;
+                mesh_info.stage = ShaderChunk::Shader::ShaderStage::MeshShader;
+                mesh_info.spirv_size = static_cast<uint32_t>(mesh_spirv_bytes);
+                mesh_info.max_vertices = max_vertices;
+                mesh_info.max_primitives = max_primitives;
+                mesh_info.workgroup_size[0] = workgroup_size[0];
+                mesh_info.workgroup_size[1] = workgroup_size[1];
+                mesh_info.workgroup_size[2] = workgroup_size[2];
+
+                std::memcpy(shader_data.data() + offset, &mesh_info, sizeof(mesh_info));
+                offset += sizeof(mesh_info);
+
+                ShaderChunk::Shader frag_info{};
+                frag_info.name_hash = frag_name_hash;
+                frag_info.entry_point_hash = main_hash;
+                frag_info.stage = ShaderChunk::Shader::ShaderStage::Fragment;
+                frag_info.spirv_size = static_cast<uint32_t>(frag_spirv_bytes);
+
+                std::memcpy(shader_data.data() + offset, &frag_info, sizeof(frag_info));
+                offset += sizeof(frag_info);
+
+                std::memcpy(shader_data.data() + offset, mesh_spirv.data(), mesh_spirv_bytes);
+                offset += mesh_spirv_bytes;
+                std::memcpy(shader_data.data() + offset, frag_spirv.data(), frag_spirv_bytes);
+
+                asset.add_chunk(ChunkType::SHDR, shader_data, "data_driven_mesh_shaders");
                 return true;
             }
 

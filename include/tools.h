@@ -80,10 +80,16 @@ namespace Taffy {
         static bool createDataDrivenSphere(const std::string& output_path,
                                             uint32_t stacks, uint32_t slices,
                                             int64_t radius_units);
-        static bool createDataDrivenTriangle(const std::string& output_path);
+        static bool createDataDrivenTriangle(const std::string& output_path,bool mesh = false);
         static bool createDataDrivenShaderChunk(Asset& asset,
             const std::vector<uint32_t>& vertex_spirv,
             const std::vector<uint32_t>& frag_spirv);
+        static bool createDataDrivenMeshShaderChunk(Asset& asset,
+            const std::vector<uint32_t>& mesh_spirv,
+            const std::vector<uint32_t>& frag_spirv,
+            uint32_t max_vertices,
+            uint32_t max_primitives,
+            const uint32_t workgroup_size[3]);
         static bool createBasicMaterialChunk(Asset& asset);
     };
 }

@@ -97,7 +97,7 @@ int main(int argc, char* argv[]) {
 		Taffy::Asset ass;
 		DataDrivenAssetCompiler compiler{};
 
-		compiler.createDataDrivenTriangle(outMaster);
+		compiler.createDataDrivenTriangle(outMaster, true);
 
 		tremor::taffy::tools::createSDFFontAsset(
 			outFont, "assets/fonts/BebasNeue-Regular.ttf", 128, 2048, 1.0f);
