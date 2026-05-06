@@ -117,7 +117,7 @@ namespace Taffy {
     // FILE I/O
     // =============================================================================
 
-    bool Asset::save_to_file(const std::string& path) {
+    bool Asset::save_to_file(const std::filesystem::path& path) {
         std::cout << "💾 Saving asset to: " << path << std::endl;
 
         std::ofstream file(path, std::ios::binary);

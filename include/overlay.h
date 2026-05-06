@@ -3,6 +3,9 @@
 #include <string>
 #include <vector>
 
+#undef min
+#undef max
+
 namespace Taffy {
 
     // =============================================================================

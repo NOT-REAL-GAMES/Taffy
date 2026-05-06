@@ -8,11 +8,25 @@ endif()
 
 # Add custom module path for finding packages
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Try to find SPIRV-Cross
 find_package(SPIRVCross QUIET)
 
+set(SHADERC_SKIP_INSTALL         ON  CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_TESTS           ON  CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_EXAMPLES        ON  CACHE BOOL "" FORCE)
+
+
 include(FetchContent)
+
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+)
+
+FetchContent_MakeAvailable(glm)
+
 
 FetchContent_Declare(
     SPIRV-Cross
@@ -45,6 +59,15 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(glslang)
+
+FetchContent_Declare(
+    shaderc
+    GIT_REPOSITORY https://github.com/google/shaderc.git
+    GIT_TAG        main
+)
+
+FetchContent_MakeAvailable(shaderc)
+
 
 # If not found via find_package, try to locate it manually in Vulkan SDK
 if(NOT SPIRVCross_FOUND)
@@ -118,6 +141,7 @@ target_link_libraries(taffy_compiler PRIVATE Taffy
     SPIRV-Headers
     SPIRV-Tools
     glslang::glslang
+    glm
 )
 
 # Create RGB test triangle generator (commented out - file doesn't exist)

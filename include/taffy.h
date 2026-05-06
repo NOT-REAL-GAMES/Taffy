@@ -564,7 +564,7 @@ namespace Taffy {
             inline uint64_t get_file_size() const;
 
             // File I/O
-            inline bool save_to_file(const std::string& path);
+            inline bool save_to_file(const std::filesystem::path& path);
             inline bool load_from_file_safe(const std::string& path);
 
             // Utility

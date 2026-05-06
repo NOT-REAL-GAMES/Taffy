@@ -929,7 +929,7 @@ void main() {
                 // Main function
                 shader << "void main() {\n";
                 shader << "    // Only let the first thread in the workgroup do the work\n";
-                shader << "    if (gl_LocalInvocationIndex != 0) return;\n\n";
+                shader << "    //if (gl_LocalInvocationIndex != 0) return;\n\n";
                 shader << "    uint vertex_count = min(pc.vertex_count, " << config.max_vertices << "u);\n";
                 shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << "u);\n\n";
 
@@ -1287,7 +1287,7 @@ void main() {
 #pragma pack(pop)
 
             std::vector<Vertex> vertices = {
-                // Front face - Red (4 vertices) - Making cube 10cm (0.1m) instead of 50cm
+                // Front face - Red (4 vertices) - Making cube 1cm instead of 50cm
                 {Vec3Q{-128000, -128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
                 {Vec3Q{ 128000, -128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
                 {Vec3Q{ 128000,  128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
@@ -1459,7 +1459,227 @@ void main() {
 
             return true;
         }
-            bool DataDrivenAssetCompiler::createDataDrivenShaderChunk(Asset& asset,
+
+        bool DataDrivenAssetCompiler::createDataDrivenSphere(const std::string& output_path,
+                                                            uint32_t stacks, uint32_t slices,
+                                                            int64_t radius_units) {
+            std::cout << "🚀 Creating UV sphere with Vec3Q support..." << std::endl;
+            std::cout << "   Stacks: " << stacks << ", Slices: " << slices << std::endl;
+            std::cout << "   Radius: " << radius_units << " units (" 
+                    << (radius_units / 128000.0) << "m)" << std::endl;
+
+            float M_PI = 3.14159265358979323846f;
+
+            Asset asset;
+            asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
+            asset.set_description("UV Sphere with Vec3Q positions and data-driven mesh shader");
+            asset.set_feature_flags(FeatureFlags::QuantizedCoords |
+                FeatureFlags::MeshShaders |
+                FeatureFlags::EmbeddedShaders |
+                FeatureFlags::HashBasedNames);
+
+        #pragma pack(push, 1)
+            struct Vertex {
+                Vec3Q position;     // 24 bytes
+                float normal[3];    // 12 bytes
+                float color[4];     // 16 bytes
+                float uv[2];        // 8 bytes
+                float tangent[4];   // 16 bytes
+            }; // Total: 76 bytes
+        #pragma pack(pop)
+
+            std::vector<Vertex> vertices;
+            std::vector<uint32_t> indices;
+
+            // Generate vertices stack by stack, slice by slice
+            // stacks = rings of latitude (pole to pole)
+            // slices = segments of longitude (around equator)
+            for (uint32_t stack = 0; stack <= stacks; ++stack) {
+                float phi = static_cast<float>(3.14159265358979323846) * stack / stacks; // 0 to PI
+                float sinPhi = std::sin(phi);
+                float cosPhi = std::cos(phi);
+
+                for (uint32_t slice = 0; slice <= slices; ++slice) {
+                    float theta = 2.0f * static_cast<float>(3.14159265358979323846) * slice / slices; // 0 to 2PI
+                    float sinTheta = std::sin(theta);
+                    float cosTheta = std::cos(theta);
+
+                    // Unit sphere normal (also the direction from center)
+                    float nx = sinPhi * cosTheta;
+                    float ny = cosPhi;
+                    float nz = sinPhi * sinTheta;
+
+                    // Vec3Q position — multiply unit normal by radius in quantized units
+                    int64_t qx = static_cast<int64_t>(nx * radius_units);
+                    int64_t qy = static_cast<int64_t>(ny * radius_units);
+                    int64_t qz = static_cast<int64_t>(nz * radius_units);
+
+                    // UV — longitude/latitude mapping
+                    float u = static_cast<float>(slice) / slices;
+                    float v = static_cast<float>(stack) / stacks;
+
+                    // Tangent — perpendicular to normal along longitude
+                    float tx = -sinTheta;
+                    float ty = 0.0f;
+                    float tz =  cosTheta;
+
+                    // Color — simple latitude gradient (pole = white, equator = cyan)
+                    float t = static_cast<float>(stack) / stacks;
+                    float r = t;
+                    float g = 1.0f - t * 0.5f;
+                    float b = 1.0f;
+
+                    Vertex vert{};
+                    vert.position   = Vec3Q(qx, qy, qz);
+                    vert.normal[0]  = nx; vert.normal[1] = ny; vert.normal[2] = nz;
+                    vert.color[0]   = r;  vert.color[1]  = g;  vert.color[2]  = b; vert.color[3] = 1.0f;
+                    vert.uv[0]      = u;  vert.uv[1]     = v;
+                    vert.tangent[0] = tx; vert.tangent[1] = ty; vert.tangent[2] = tz; vert.tangent[3] = 1.0f;
+
+                    vertices.push_back(vert);
+                }
+            }
+
+            // Generate indices — two triangles per quad between adjacent stacks/slices
+            // Vertex at (stack, slice) = stack * (slices+1) + slice
+            for (uint32_t stack = 0; stack < stacks; ++stack) {
+                for (uint32_t slice = 0; slice < slices; ++slice) {
+                    uint32_t tl = stack       * (slices + 1) + slice;
+                    uint32_t tr = stack       * (slices + 1) + slice + 1;
+                    uint32_t bl = (stack + 1) * (slices + 1) + slice;
+                    uint32_t br = (stack + 1) * (slices + 1) + slice + 1;
+
+                    if (stack == 0) {
+                        // Top pole — one triangle per slice
+                        indices.push_back(tl);
+                        indices.push_back(br);
+                        indices.push_back(bl);
+                    } else if (stack == stacks - 1) {
+                        // Bottom pole — one triangle per slice
+                        indices.push_back(tl);
+                        indices.push_back(tr);
+                        indices.push_back(br);
+                    } else {
+                        // Middle quads — two triangles
+                        indices.push_back(tl);
+                        indices.push_back(tr);
+                        indices.push_back(bl);
+
+                        indices.push_back(tr);
+                        indices.push_back(br);
+                        indices.push_back(bl);
+                    }
+                }
+            }
+
+            std::cout << "   Vertices: " << vertices.size() << std::endl;
+            std::cout << "   Triangles: " << indices.size() / 3 << std::endl;
+
+            std::cout << "   First vertex position: (" 
+              << static_cast<int64_t>(vertices[0].position.x - 9223372036854775808ULL) << ", "
+              << static_cast<int64_t>(vertices[0].position.y - 9223372036854775808ULL) << ", "
+              << static_cast<int64_t>(vertices[0].position.z - 9223372036854775808ULL) << ")" << std::endl;
+            std::cout << "   Mid vertex position: ("
+              << static_cast<int64_t>(vertices[vertices.size()/2].position.x - 9223372036854775808ULL) << ", "
+              << static_cast<int64_t>(vertices[vertices.size()/2].position.y - 9223372036854775808ULL) << ", "
+              << static_cast<int64_t>(vertices[vertices.size()/2].position.z - 9223372036854775808ULL) << ")" << std::endl;
+
+
+            // Geometry chunk
+            GeometryChunk geom_header{};
+            geom_header.vertex_count   = static_cast<uint32_t>(vertices.size());
+            geom_header.index_count    = static_cast<uint32_t>(indices.size());
+            geom_header.vertex_stride  = sizeof(Vertex);
+            geom_header.vertex_format  = VertexFormat::Position3D | VertexFormat::Normal |
+                                        VertexFormat::Color | VertexFormat::TexCoord0 | VertexFormat::Tangent;
+            geom_header.bounds_min     = Vec3Q(-radius_units, -radius_units, -radius_units);
+            geom_header.bounds_max     = Vec3Q( radius_units,  radius_units,  radius_units);
+            geom_header.lod_distance   = 1000.0f;
+            geom_header.lod_level      = 0;
+
+            // Mesh shader config — sphere can have many verts, workgroup covers one quad strip
+            uint32_t max_verts = std::min((slices + 1) * 2, 256u); // Two rows per workgroup
+            uint32_t max_prims = std::min(slices * 2, 256u);
+
+            geom_header.render_mode           = GeometryChunk::MeshShader;
+            geom_header.ms_max_vertices       = max_verts;
+            geom_header.ms_max_primitives     = max_prims;
+            geom_header.ms_workgroup_size[0]  = 8;
+            geom_header.ms_workgroup_size[1]  = 1;
+            geom_header.ms_workgroup_size[2]  = 1;
+            geom_header.ms_primitive_type     = GeometryChunk::Triangles;
+            geom_header.ms_flags              = 0;
+
+            // Pack geometry data
+            size_t vertex_data_size = vertices.size() * sizeof(Vertex);
+            size_t index_data_size  = indices.size()  * sizeof(uint32_t);
+            size_t total_size       = sizeof(GeometryChunk) + vertex_data_size + index_data_size;
+
+            std::vector<uint8_t> geom_data(total_size);
+            size_t offset = 0;
+
+            std::memcpy(geom_data.data() + offset, &geom_header, sizeof(geom_header));
+            offset += sizeof(geom_header);
+            std::memcpy(geom_data.data() + offset, vertices.data(), vertex_data_size);
+            offset += vertex_data_size;
+            std::memcpy(geom_data.data() + offset, indices.data(), index_data_size);
+
+            asset.add_chunk(ChunkType::GEOM, geom_data, "vec3q_sphere_geometry");
+
+            // Shader config — identical attribute layout to cube
+            MeshShaderGenerator::ShaderConfig config;
+            config.max_vertices          = max_verts;
+            config.max_primitives        = max_prims;
+            config.workgroup_x           = 8;
+            config.workgroup_y           = 1;
+            config.workgroup_z           = 1;
+            config.primitive_type        = GeometryChunk::Triangles;
+            config.vertex_stride         = sizeof(Vertex);
+            config.vertex_count          = geom_header.vertex_count;
+            config.has_indices           = true;
+            config.index_count           = geom_header.index_count;
+            config.prefersCompactVertexOutput = true;
+            config.supportsOverlays      = true;
+
+            config.attributes = {
+                {VertexAttribute::Vec3Q,  0,  0, "position"},
+                {VertexAttribute::Float3, 24, 1, "normal"},
+                {VertexAttribute::Float4, 36, 2, "color"},
+                {VertexAttribute::Float2, 52, 3, "uv"},
+                {VertexAttribute::Float4, 60, 4, "tangent"}
+            };
+
+            std::string mesh_shader_glsl = MeshShaderGenerator::generateMeshShader(config);
+            std::string frag_shader_glsl = MeshShaderGenerator::generateFragmentShader(config);
+
+            tremor::taffy::tools::TaffyAssetCompiler compiler;
+            auto mesh_spirv = compiler.compileGLSLToSpirv(mesh_shader_glsl, shaderc_mesh_shader,     "sphere_mesh_shader");
+            auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "sphere_fragment_shader");
+
+            if (mesh_spirv.empty() || frag_spirv.empty()) {
+                std::cerr << "❌ Shader compilation failed!" << std::endl;
+                return false;
+            }
+
+            if (!createDataDrivenShaderChunk(asset, mesh_spirv, frag_spirv)) return false;
+            if (!createBasicMaterialChunk(asset))                             return false;
+
+            std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
+            if (!asset.save_to_file(output_path)) {
+                std::cerr << "❌ Failed to save asset!" << std::endl;
+                return false;
+            }
+
+            std::cout << "✅ Vec3Q UV sphere created!" << std::endl;
+            std::cout << "   📁 File: " << output_path << std::endl;
+            std::cout << "   📊 Vertices: " << vertices.size() << std::endl;
+            std::cout << "   📊 Triangles: " << indices.size() / 3 << std::endl;
+            std::cout << "   🎯 Vertex stride: " << sizeof(Vertex) << " bytes" << std::endl;
+
+            return true;
+        }
+
+        bool DataDrivenAssetCompiler::createDataDrivenShaderChunk(Asset& asset,
                 const std::vector<uint32_t>& mesh_spirv,
                 const std::vector<uint32_t>& frag_spirv) {
                 using namespace Taffy;

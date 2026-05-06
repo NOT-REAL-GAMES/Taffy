@@ -69,6 +69,15 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	if (command == "sphere") {
+		std::string outMaster = argv[2];
+		
+		DataDrivenAssetCompiler compiler{};
+
+		compiler.createDataDrivenSphere(outMaster, 12, 24, 1280000);
+
+	}
+
 	if (command == "demo") {
 		if (argc < 5) {
 			std::cout << "Usage: " << argv[0] << " demo <master_output> <overlay_output> <font_output> [audio_output_dir]" << std::endl;
