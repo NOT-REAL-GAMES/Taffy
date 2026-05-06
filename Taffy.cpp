@@ -70,12 +70,16 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (command == "sphere") {
+		if (argc < 3) {
+			std::cout << "Usage: " << argv[0] << " sphere <output.taf>" << std::endl;
+			return 1;
+		}
+
 		std::string outMaster = argv[2];
 		
 		DataDrivenAssetCompiler compiler{};
 
-		compiler.createDataDrivenSphere(outMaster, 12, 24, 1280000);
-
+		return compiler.createDataDrivenSphere(outMaster, 12, 24, 1280000) ? 0 : 1;
 	}
 
 	if (command == "demo") {
@@ -141,8 +145,8 @@ int main(int argc, char* argv[]) {
 			std::cout << "✅ Audio assets generated!" << std::endl;
 		}
 
-		return createHotPinkShaderOverlay(outOverlay);
-	}
+        return createHotPinkShaderOverlay(outOverlay) ? 0 : 1;
+    }
 
 	// Unknown command
 	std::cerr << "❌ Unknown command: " << command << std::endl;
