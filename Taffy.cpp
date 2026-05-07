@@ -46,6 +46,10 @@ void printUsage(const char* program_name) {
 	std::cout << "    Generate demo assets" << std::endl;
 	std::cout << "  " << program_name << " create <input.obj> <output.taf>" << std::endl;
 	std::cout << "    Create Taffy asset from OBJ file" << std::endl;
+	std::cout << "  " << program_name << " cube <output.taf> [mesh]" << std::endl;
+	std::cout << "    Create the built-in cube asset" << std::endl;
+	std::cout << "  " << program_name << " sphere <output.taf> [mesh]" << std::endl;
+	std::cout << "    Create the built-in sphere asset" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -71,15 +75,30 @@ int main(int argc, char* argv[]) {
 
 	if (command == "sphere") {
 		if (argc < 3) {
-			std::cout << "Usage: " << argv[0] << " sphere <output.taf>" << std::endl;
+			std::cout << "Usage: " << argv[0] << " sphere <output.taf> [mesh]" << std::endl;
 			return 1;
 		}
 
 		std::string outMaster = argv[2];
+		bool mesh = (argc >= 4 && std::string(argv[3]) == "mesh");
 		
 		DataDrivenAssetCompiler compiler{};
 
-		return compiler.createDataDrivenSphere(outMaster, 12, 24, 1280000) ? 0 : 1;
+		return compiler.createDataDrivenSphere(outMaster, 12, 24, 64000, mesh) ? 0 : 1;
+	}
+
+	if (command == "cube") {
+		if (argc < 3) {
+			std::cout << "Usage: " << argv[0] << " cube <output.taf> [mesh]" << std::endl;
+			return 1;
+		}
+
+		std::string outMaster = argv[2];
+		bool mesh = (argc >= 4 && std::string(argv[3]) == "mesh");
+
+		DataDrivenAssetCompiler compiler{};
+
+		return compiler.createDataDrivenTriangle(outMaster, mesh) ? 0 : 1;
 	}
 
 	if (command == "demo") {

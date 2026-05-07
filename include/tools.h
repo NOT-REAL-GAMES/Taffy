@@ -79,7 +79,8 @@ namespace Taffy {
     public:
         static bool createDataDrivenSphere(const std::string& output_path,
                                             uint32_t stacks, uint32_t slices,
-                                            int64_t radius_units);
+                                            int64_t radius_units,
+                                            bool mesh = false);
         static bool createDataDrivenTriangle(const std::string& output_path,bool mesh = false);
         static bool createDataDrivenShaderChunk(Asset& asset,
             const std::vector<uint32_t>& vertex_spirv,

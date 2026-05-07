@@ -200,8 +200,8 @@ namespace Taffy {
                 Points = 2
             } ms_primitive_type;
 
-            uint32_t ms_flags;             // Additional mesh shader flags
-            uint32_t reserved[2];          // Reduced for new fields
+            uint32_t ms_flags;             // Bit 0: meshlet data appended after indices
+            uint32_t reserved[2];          // reserved[0] = meshlet count, reserved[1] = meshlet vertex index count
         };
 
         // Vertex attribute descriptor for data-driven shaders

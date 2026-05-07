@@ -874,6 +874,10 @@ void main() {
                 shader << "    uint index_offset_bytes;\n";  // Offset to index data in buffer
                 shader << "    uint overlay_flags;\n";  // Bit flags for active overlays
                 shader << "    uint overlay_data_offset;\n";  // Offset to overlay data in buffer
+                shader << "    uint meshlet_count;\n";
+                shader << "    uint meshlet_desc_offset_bytes;\n";
+                shader << "    uint meshlet_vertex_index_offset_bytes;\n";
+                shader << "    uint meshlet_primitive_index_offset_bytes;\n";
                 shader << "} pc;\n\n";
 
                 // Output attributes
@@ -894,14 +898,13 @@ void main() {
                 shader << "    uint z_lo = vertexBuffer.vertices[baseOffsetUints + 4];\n";
                 shader << "    uint z_hi = vertexBuffer.vertices[baseOffsetUints + 5];\n";
                 shader << "    \n";
-                shader << "    // Reconstruct int64 values and convert to float\n";
-                shader << "    // Note: This assumes the values fit in float range\n";
-                shader << "    double x = -1.0 + double((uint(x_hi)-2147483647)) + double((uint(x_lo)-2147483647))/4294967296.0  ;\n";
-                shader << "    double y = -1.0 + double((uint(y_hi)-2147483647)) + double((uint(y_lo)-2147483647))/4294967296.0  ;\n";
-                shader << "    double z = -1.0 + double((uint(z_hi)-2147483647)) + double((uint(z_lo)-2147483647))/4294967296.0  ;\n";
+                shader << "    // Remove the 2^63 bias from the high word, then reconstruct the signed value.\n";
+                shader << "    double x = double(int(x_hi - 0x80000000u)) * 4294967296.0 + double(x_lo);\n";
+                shader << "    double y = double(int(y_hi - 0x80000000u)) * 4294967296.0 + double(y_lo);\n";
+                shader << "    double z = double(int(z_hi - 0x80000000u)) * 4294967296.0 + double(z_lo);\n";
                 shader << "    \n";
                 shader << "    // Convert from quantized units to world units\n";
-                shader << "    vec3 result = vec3(x/1.28, y/1.28, z/1.28);\n";
+                shader << "    vec3 result = vec3(x/128000.0, y/128000.0, z/128000.0);\n";
                 shader << "    \n";
 
                 shader << "    \n";
@@ -923,47 +926,106 @@ void main() {
                 shader << "    return vertexBuffer.vertices[word_offset];\n";
                 shader << "}\n\n";
 
+                shader << "struct MeshletDesc {\n";
+                shader << "    uint vertexOffset;\n";
+                shader << "    uint vertexCount;\n";
+                shader << "    uint primitiveOffset;\n";
+                shader << "    uint primitiveCount;\n";
+                shader << "};\n\n";
+
+                shader << "MeshletDesc readMeshletDesc(uint meshletIndex) {\n";
+                shader << "    uint byte_offset = pc.meshlet_desc_offset_bytes + meshletIndex * 16u;\n";
+                shader << "    uint word_offset = byte_offset / 4u;\n";
+                shader << "    MeshletDesc desc;\n";
+                shader << "    desc.vertexOffset = vertexBuffer.vertices[word_offset + 0u];\n";
+                shader << "    desc.vertexCount = vertexBuffer.vertices[word_offset + 1u];\n";
+                shader << "    desc.primitiveOffset = vertexBuffer.vertices[word_offset + 2u];\n";
+                shader << "    desc.primitiveCount = vertexBuffer.vertices[word_offset + 3u];\n";
+                shader << "    return desc;\n";
+                shader << "}\n\n";
+
+                shader << "uint readMeshletVertexIndex(uint indexNum) {\n";
+                shader << "    uint byte_offset = pc.meshlet_vertex_index_offset_bytes + indexNum * 4u;\n";
+                shader << "    return vertexBuffer.vertices[byte_offset / 4u];\n";
+                shader << "}\n\n";
+
+                shader << "uint readMeshletPrimitiveIndex(uint indexNum) {\n";
+                shader << "    uint byte_offset = pc.meshlet_primitive_index_offset_bytes + indexNum * 4u;\n";
+                shader << "    return vertexBuffer.vertices[byte_offset / 4u];\n";
+                shader << "}\n\n";
+
                 // Other attribute accessors
                 generateAttributeAccessors(shader, config);
 
                 // Main function
                 shader << "void main() {\n";
                 shader << "    // Only let the first thread in the workgroup do the work\n";
-                shader << "    //if (gl_LocalInvocationIndex != 0) return;\n\n";
+                shader << "    if (gl_LocalInvocationIndex != 0) return;\n\n";
+                shader << "    bool useMeshlets = pc.meshlet_count > 0u;\n";
+                shader << "    bool showMeshletDebugColors = useMeshlets && ((pc.overlay_flags & 0x1u) != 0u);\n";
                 shader << "    uint vertex_count = min(pc.vertex_count, " << config.max_vertices << "u);\n";
-                shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << "u);\n\n";
+                shader << "    uint primitive_count = min(pc.primitive_count, " << config.max_primitives << "u);\n";
+                shader << "    uint meshlet_vertex_base = 0u;\n";
+                shader << "    uint meshlet_primitive_base = 0u;\n";
+                shader << "    vec4 debugMeshletColor = vec4(1.0, 1.0, 1.0, 1.0);\n";
+                shader << "    if (useMeshlets) {\n";
+                shader << "        MeshletDesc meshlet = readMeshletDesc(gl_WorkGroupID.x);\n";
+                shader << "        vertex_count = min(meshlet.vertexCount, " << config.max_vertices << "u);\n";
+                shader << "        primitive_count = min(meshlet.primitiveCount, " << config.max_primitives << "u);\n";
+                shader << "        meshlet_vertex_base = meshlet.vertexOffset;\n";
+                shader << "        meshlet_primitive_base = meshlet.primitiveOffset;\n";
+                shader << "        if (showMeshletDebugColors) {\n";
+                shader << "            float meshletHue = fract(float(gl_WorkGroupID.x) * 0.61803398875);\n";
+                shader << "            debugMeshletColor = vec4(\n";
+                shader << "                0.35 + 0.65 * clamp(abs(meshletHue * 6.0 - 3.0) - 1.0, 0.0, 1.0),\n";
+                shader << "                0.35 + 0.65 * clamp(2.0 - abs(meshletHue * 6.0 - 2.0), 0.0, 1.0),\n";
+                shader << "                0.35 + 0.65 * clamp(2.0 - abs(meshletHue * 6.0 - 4.0), 0.0, 1.0),\n";
+                shader << "                1.0);\n";
+                shader << "        }\n";
+                shader << "    }\n\n";
 
                 shader << "    SetMeshOutputsEXT(vertex_count, primitive_count);\n\n";
                 
                 shader << "    // Debug: Check center of mass of vertices\n";
                 shader << "    vec3 centerOfMass = vec3(0.0);\n\n";
 
+                bool hasColorAttribute = false;
+                for (const auto& attr : config.attributes) {
+                    if (strcmp(attr.name, "color") == 0) {
+                        hasColorAttribute = true;
+                        break;
+                    }
+                }
+
                 if (config.prefersCompactVertexOutput) {
                     // Read vertices from buffer instead of hardcoding
                     shader << "    // Read vertices from buffer and transform them\n";
                     shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
-                    generateVertexProcessing(shader, config.attributes);
+                    shader << "        uint sourceVertexIndex = useMeshlets ? readMeshletVertexIndex(meshlet_vertex_base + i) : i;\n";
+                    generateVertexProcessing(shader, config.attributes, "sourceVertexIndex");
+                    if (hasColorAttribute) {
+                        shader << "        if (showMeshletDebugColors) {\n";
+                        shader << "            color[i] = debugMeshletColor;\n";
+                        shader << "        }\n";
+                    }
                     shader << "    }\n\n";
-                    
-                    shader << "    \n";
-                    shader << "    // Debug: Override colors to show cube structure\n";
-                    shader << "    // Make vertex 7 (should be back-top-right) bright white\n";
-                    shader << "    color[7] = vec4(1.0, 1.0, 1.0, 1.0);\n";
-                    shader << "    // Make vertex 2 (should be front-top-right) bright yellow\n";
-                    shader << "    color[2] = vec4(1.0, 1.0, 0.0, 1.0);\n";
-                    shader << "    // Make vertex 16 (should be right face, bottom-front) bright magenta\n";
-                    shader << "    color[16] = vec4(1.0, 0.0, 1.0, 1.0);\n\n";
-                    
+
                     // Generate primitives based on indices
-                    generatePrimitiveGeneration(shader, config);
+                    generatePrimitiveGeneration(shader, config, "useMeshlets", "meshlet_primitive_base");
                 } else {
                     // Generate vertices from buffer
                     shader << "    for (uint i = 0; i < vertex_count; ++i) {\n";
-                    generateVertexProcessing(shader, config.attributes);
+                    shader << "        uint sourceVertexIndex = useMeshlets ? readMeshletVertexIndex(meshlet_vertex_base + i) : i;\n";
+                    generateVertexProcessing(shader, config.attributes, "sourceVertexIndex");
+                    if (hasColorAttribute) {
+                        shader << "        if (showMeshletDebugColors) {\n";
+                        shader << "            color[i] = debugMeshletColor;\n";
+                        shader << "        }\n";
+                    }
                     shader << "    }\n\n";
                     
                     // Generate primitives
-                    generatePrimitiveGeneration(shader, config);
+                    generatePrimitiveGeneration(shader, config, "useMeshlets", "meshlet_primitive_base");
                 }
 
                 shader << "}\n";
@@ -987,6 +1049,10 @@ void main() {
                 shader << "    uint index_offset_bytes;\n";
                 shader << "    uint overlay_flags;\n";
                 shader << "    uint overlay_data_offset;\n";
+                shader << "    uint meshlet_count;\n";
+                shader << "    uint meshlet_desc_offset_bytes;\n";
+                shader << "    uint meshlet_vertex_index_offset_bytes;\n";
+                shader << "    uint meshlet_primitive_index_offset_bytes;\n";
                 shader << "} pc;\n\n";
 
                 for (const auto& attr : config.attributes) {
@@ -1005,10 +1071,10 @@ void main() {
                 shader << "    uint y_hi = vertexBuffer.vertices[baseOffsetUints + 3];\n";
                 shader << "    uint z_lo = vertexBuffer.vertices[baseOffsetUints + 4];\n";
                 shader << "    uint z_hi = vertexBuffer.vertices[baseOffsetUints + 5];\n";
-                shader << "    double x = -1.0 + double((uint(x_hi)-2147483647)) + double((uint(x_lo)-2147483647))/4294967296.0;\n";
-                shader << "    double y = -1.0 + double((uint(y_hi)-2147483647)) + double((uint(y_lo)-2147483647))/4294967296.0;\n";
-                shader << "    double z = -1.0 + double((uint(z_hi)-2147483647)) + double((uint(z_lo)-2147483647))/4294967296.0;\n";
-                shader << "    return vec3(x / 1.28, y / 1.28, z / 1.28);\n";
+                shader << "    double x = double(int(x_hi - 0x80000000u)) * 4294967296.0 + double(x_lo);\n";
+                shader << "    double y = double(int(y_hi - 0x80000000u)) * 4294967296.0 + double(y_lo);\n";
+                shader << "    double z = double(int(z_hi - 0x80000000u)) * 4294967296.0 + double(z_lo);\n";
+                shader << "    return vec3(x / 128000.0, y / 128000.0, z / 128000.0);\n";
                 shader << "}\n\n";
 
                 generateAttributeAccessors(shader, config);
@@ -1109,6 +1175,10 @@ void main() {
                 shader << "    uint index_offset_bytes;\n";
                 shader << "    uint overlay_flags;\n";
                 shader << "    uint overlay_data_offset;\n";
+                shader << "    uint meshlet_count;\n";
+                shader << "    uint meshlet_desc_offset_bytes;\n";
+                shader << "    uint meshlet_vertex_index_offset_bytes;\n";
+                shader << "    uint meshlet_primitive_index_offset_bytes;\n";
                 shader << "} pc;\n\n";
 
                 shader << "layout(location = 0) out vec4 fragColor;\n\n";
@@ -1273,51 +1343,42 @@ void main() {
             }
 
             static void generateVertexProcessing(std::stringstream& shader,
-                const std::vector<VertexAttribute>& attributes) {
+                const std::vector<VertexAttribute>& attributes,
+                const std::string& sourceIndexExpr) {
                 for (const auto& attr : attributes) {
                     if (strcmp(attr.name, "position") == 0) {
                         if (attr.type == VertexAttribute::Vec3Q) {
                             // Use special Vec3Q reader - pass offset in bytes
-                            shader << "        vec3 position = readVec3Q(i, " << attr.offset << "u);\n";
+                            shader << "        vec3 position = readVec3Q(" << sourceIndexExpr << ", " << attr.offset << "u);\n";
                         }
                         else {
-                            shader << "        vec3 position = read_" << attr.name << "(i);\n";
+                            shader << "        vec3 position = read_" << attr.name << "(" << sourceIndexExpr << ");\n";
                         }
-                        shader << "        // Debug: Color vertices based on their Y position\n";
-                        shader << "        // Vertices with Y > 0.01 should be colored differently\n";
-                        shader << "        if (position.y > 0.01) {\n";
-                        shader << "            // This vertex has elevated Y position - make it cyan\n";
-                        shader << "            color[i] = vec4(0.0, 1.0, 1.0, 1.0);\n";
-                        shader << "        }\n";
-                        shader << "        // Store the untransformed position for debugging\n";
                         shader << "        centerOfMass += position;\n";
                         shader << "        gl_MeshVerticesEXT[i].gl_Position = pc.mvp * vec4(position, 1.0);\n\n";
                     }
                     else {
-                        shader << "        " << attr.name << "[i] = read_" << attr.name << "(i);\n";
+                        shader << "        " << attr.name << "[i] = read_" << attr.name << "(" << sourceIndexExpr << ");\n";
                     }
                 }
                 
-                // Set primitive ID (same for all vertices of a primitive)
-                shader << "        primitiveID[i] = 0u; // All vertices belong to primitive 0\n";
-                
-                // Set barycentric coordinates for each vertex
-                shader << "        // Set barycentric coordinates for manual interpolation\n";
-                shader << "        if (i == 0u) barycentricCoords[i] = vec3(1.0, 0.0, 0.0);\n";
-                shader << "        else if (i == 1u) barycentricCoords[i] = vec3(0.0, 1.0, 0.0);\n";
-                shader << "        else if (i == 2u) barycentricCoords[i] = vec3(0.0, 0.0, 1.0);\n";
+                shader << "        primitiveID[i] = 0u;\n";
+                shader << "        barycentricCoords[i] = vec3(0.0);\n";
             }
 
-            static void generatePrimitiveGeneration(std::stringstream& shader, const ShaderConfig& config) {
+            static void generatePrimitiveGeneration(std::stringstream& shader,
+                const ShaderConfig& config,
+                const std::string& useMeshletsExpr,
+                const std::string& meshletPrimitiveBaseExpr) {
                 shader << "    // Generate primitives\n";
 
                 switch (config.primitive_type) {
                 case GeometryChunk::Triangles:
                     shader << "    for (uint i = 0; i < primitive_count; ++i) {\n";
                     if (config.has_indices) {
-                        shader << "        uint idx0 = readIndex(i * 3u);\n";
-                        shader << "        uint idx1 = readIndex(i * 3u + 1u);\n";
-                        shader << "        uint idx2 = readIndex(i * 3u + 2u);\n";
+                        shader << "        uint idx0 = " << useMeshletsExpr << " ? readMeshletPrimitiveIndex(" << meshletPrimitiveBaseExpr << " + i * 3u) : readIndex(i * 3u);\n";
+                        shader << "        uint idx1 = " << useMeshletsExpr << " ? readMeshletPrimitiveIndex(" << meshletPrimitiveBaseExpr << " + i * 3u + 1u) : readIndex(i * 3u + 1u);\n";
+                        shader << "        uint idx2 = " << useMeshletsExpr << " ? readMeshletPrimitiveIndex(" << meshletPrimitiveBaseExpr << " + i * 3u + 2u) : readIndex(i * 3u + 2u);\n";
                         shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(idx0, idx1, idx2);\n";
                     } else {
                         shader << "        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(i*3u, i*3u+1u, i*3u+2u);\n";
@@ -1403,41 +1464,41 @@ void main() {
 #pragma pack(pop)
 
             std::vector<Vertex> vertices = {
-                // Front face - Red (4 vertices) - Making cube 1cm instead of 50cm
-                {Vec3Q{-128000, -128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000, -128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000,  128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{-128000,  128000,  128000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                // Front face - Red (4 vertices) - Unit cube with 0.5m half extents
+                {Vec3Q{-64000, -64000,  64000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000, -64000,  64000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000,  64000,  64000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000,  64000,  64000}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
                 
                 // Back face - Green (4 vertices)
-                {Vec3Q{ 128000, -128000, -128000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{-128000, -128000, -128000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{-128000,  128000, -128000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000,  128000, -128000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000, -64000, -64000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000, -64000, -64000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000,  64000, -64000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000,  64000, -64000}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f, 1.0f}},
                 
                 // Top face - Blue (4 vertices)
-                {Vec3Q{-128000,  128000,  128000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000,  128000,  128000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000,  128000, -128000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{-128000,  128000, -128000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000,  64000,  64000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000,  64000,  64000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000,  64000, -64000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000,  64000, -64000}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
                 
                 // Bottom face - Yellow (4 vertices)
-                {Vec3Q{-128000, -128000, -128000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000, -128000, -128000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{ 128000, -128000,  128000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-                {Vec3Q{-128000, -128000,  128000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000, -64000, -64000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000, -64000, -64000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{ 64000, -64000,  64000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
+                {Vec3Q{-64000, -64000,  64000}, {0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
                 
                 // Right face - Magenta (4 vertices)
-                {Vec3Q{ 128000, -128000,  128000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-                {Vec3Q{ 128000, -128000, -128000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-                {Vec3Q{ 128000,  128000, -128000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-                {Vec3Q{ 128000,  128000,  128000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 64000, -64000,  64000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 64000, -64000, -64000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 64000,  64000, -64000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
+                {Vec3Q{ 64000,  64000,  64000}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
                 
                 // Left face - Cyan (4 vertices)
-                {Vec3Q{-128000, -128000, -128000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
-                {Vec3Q{-128000, -128000,  128000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
-                {Vec3Q{-128000,  128000,  128000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
-                {Vec3Q{-128000,  128000, -128000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}}
+                {Vec3Q{-64000, -64000, -64000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+                {Vec3Q{-64000, -64000,  64000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+                {Vec3Q{-64000,  64000,  64000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}},
+                {Vec3Q{-64000,  64000, -64000}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, -1.0f, 1.0f}}
             };
 
             // Create geometry chunk with mesh shader configuration  
@@ -1463,8 +1524,8 @@ void main() {
             std::cout << "DEBUG: Vertex struct size is " << sizeof(Vertex) << " bytes" << std::endl;
             geom_header.vertex_format = VertexFormat::Position3D | VertexFormat::Normal |
                 VertexFormat::Color | VertexFormat::TexCoord0 | VertexFormat::Tangent;
-            geom_header.bounds_min = Vec3Q{ -128000, -128000, -128000 };
-            geom_header.bounds_max = Vec3Q{ 128000, 128000, 128000 };
+            geom_header.bounds_min = Vec3Q{ -64000, -64000, -64000 };
+            geom_header.bounds_max = Vec3Q{ 64000, 64000, 64000 };
             geom_header.lod_distance = 1000.0f;
             geom_header.lod_level = 0;
 
@@ -1619,7 +1680,8 @@ void main() {
 
         bool DataDrivenAssetCompiler::createDataDrivenSphere(const std::string& output_path,
                                                             uint32_t stacks, uint32_t slices,
-                                                            int64_t radius_units) {
+                                                            int64_t radius_units,
+                                                            bool mesh) {
             std::cout << "🚀 Creating UV sphere with Vec3Q support..." << std::endl;
             std::cout << "   Stacks: " << stacks << ", Slices: " << slices << std::endl;
             std::cout << "   Radius: " << radius_units << " units (" 
@@ -1629,10 +1691,18 @@ void main() {
 
             Asset asset;
             asset.set_creator("Vec3Q Data-Driven Taffy Compiler");
-            asset.set_description("UV Sphere with Vec3Q positions and data-driven traditional shader pipeline");
-            asset.set_feature_flags(FeatureFlags::QuantizedCoords |
-                FeatureFlags::EmbeddedShaders |
-                FeatureFlags::HashBasedNames);
+            if (mesh) {
+                asset.set_description("UV Sphere with Vec3Q positions and data-driven mesh shader");
+                asset.set_feature_flags(FeatureFlags::QuantizedCoords |
+                    FeatureFlags::MeshShaders |
+                    FeatureFlags::EmbeddedShaders |
+                    FeatureFlags::HashBasedNames);
+            } else {
+                asset.set_description("UV Sphere with Vec3Q positions and data-driven traditional shader pipeline");
+                asset.set_feature_flags(FeatureFlags::QuantizedCoords |
+                    FeatureFlags::EmbeddedShaders |
+                    FeatureFlags::HashBasedNames);
+            }
 
         #pragma pack(push, 1)
             struct Vertex {
@@ -1756,20 +1826,118 @@ void main() {
             // Mesh shader config — sphere can have many verts, workgroup covers one quad strip
             uint32_t max_verts = std::min((slices + 1) * 2, 256u); // Two rows per workgroup
             uint32_t max_prims = std::min(slices * 2, 256u);
+            std::vector<uint8_t> meshlet_data;
 
-            geom_header.render_mode           = GeometryChunk::Traditional;
+            if (mesh) {
+                struct Meshlet {
+                    std::vector<uint32_t> vertexIndices;
+                    std::vector<uint32_t> primitiveIndices;
+                };
+                struct MeshletDesc {
+                    uint32_t vertexOffset;
+                    uint32_t vertexCount;
+                    uint32_t primitiveOffset;
+                    uint32_t primitiveCount;
+                };
+
+                constexpr uint32_t MESHLET_MAX_VERTS = 64;
+                constexpr uint32_t MESHLET_MAX_PRIMS = 126;
+                max_verts = MESHLET_MAX_VERTS;
+                max_prims = MESHLET_MAX_PRIMS;
+
+                auto buildMeshlets = [&](uint32_t maxVerts, uint32_t maxPrims) -> std::vector<Meshlet> {
+                    std::vector<Meshlet> meshlets;
+                    Meshlet current;
+                    std::unordered_map<uint32_t, uint32_t> globalToLocal;
+
+                    for (size_t i = 0; i < indices.size(); i += 3) {
+                        uint32_t tri[3] = { indices[i], indices[i + 1], indices[i + 2] };
+
+                        uint32_t newVerts = 0;
+                        for (uint32_t idx : tri) {
+                            if (globalToLocal.find(idx) == globalToLocal.end()) {
+                                ++newVerts;
+                            }
+                        }
+
+                        bool vertOverflow = (current.vertexIndices.size() + newVerts > maxVerts);
+                        bool primOverflow = (current.primitiveIndices.size() / 3 + 1 > maxPrims);
+                        if (!current.vertexIndices.empty() && (vertOverflow || primOverflow)) {
+                            meshlets.push_back(std::move(current));
+                            current = Meshlet{};
+                            globalToLocal.clear();
+                        }
+
+                        for (uint32_t idx : tri) {
+                            if (globalToLocal.find(idx) == globalToLocal.end()) {
+                                globalToLocal[idx] = static_cast<uint32_t>(current.vertexIndices.size());
+                                current.vertexIndices.push_back(idx);
+                            }
+                            current.primitiveIndices.push_back(globalToLocal[idx]);
+                        }
+                    }
+
+                    if (!current.vertexIndices.empty()) {
+                        meshlets.push_back(std::move(current));
+                    }
+
+                    return meshlets;
+                };
+
+                auto meshlets = buildMeshlets(MESHLET_MAX_VERTS, MESHLET_MAX_PRIMS);
+                std::cout << "   Meshlets: " << meshlets.size() << std::endl;
+
+                std::vector<MeshletDesc> meshletDescs;
+                std::vector<uint32_t> meshletVertexIndices;
+                std::vector<uint32_t> meshletPrimIndices;
+
+                for (const auto& m : meshlets) {
+                    MeshletDesc desc{};
+                    desc.vertexOffset = static_cast<uint32_t>(meshletVertexIndices.size());
+                    desc.vertexCount = static_cast<uint32_t>(m.vertexIndices.size());
+                    desc.primitiveOffset = static_cast<uint32_t>(meshletPrimIndices.size());
+                    desc.primitiveCount = static_cast<uint32_t>(m.primitiveIndices.size() / 3);
+
+                    meshletDescs.push_back(desc);
+                    meshletVertexIndices.insert(meshletVertexIndices.end(),
+                        m.vertexIndices.begin(), m.vertexIndices.end());
+                    meshletPrimIndices.insert(meshletPrimIndices.end(),
+                        m.primitiveIndices.begin(), m.primitiveIndices.end());
+                }
+
+                size_t meshletDescSize = meshletDescs.size() * sizeof(MeshletDesc);
+                size_t meshletVertSize = meshletVertexIndices.size() * sizeof(uint32_t);
+                size_t meshletPrimSize = meshletPrimIndices.size() * sizeof(uint32_t);
+                meshlet_data.resize(meshletDescSize + meshletVertSize + meshletPrimSize);
+
+                size_t meshletOffset = 0;
+                std::memcpy(meshlet_data.data() + meshletOffset, meshletDescs.data(), meshletDescSize);
+                meshletOffset += meshletDescSize;
+                std::memcpy(meshlet_data.data() + meshletOffset, meshletVertexIndices.data(), meshletVertSize);
+                meshletOffset += meshletVertSize;
+                std::memcpy(meshlet_data.data() + meshletOffset, meshletPrimIndices.data(), meshletPrimSize);
+
+                geom_header.ms_flags = 1u;
+                geom_header.reserved[0] = static_cast<uint32_t>(meshletDescs.size());
+                geom_header.reserved[1] = static_cast<uint32_t>(meshletVertexIndices.size());
+            } else {
+                geom_header.ms_flags = 0u;
+                geom_header.reserved[0] = 0u;
+                geom_header.reserved[1] = 0u;
+            }
+
+            geom_header.render_mode           = mesh ? GeometryChunk::MeshShader : GeometryChunk::Traditional;
             geom_header.ms_max_vertices       = max_verts;
             geom_header.ms_max_primitives     = max_prims;
-            geom_header.ms_workgroup_size[0]  = 8;
+            geom_header.ms_workgroup_size[0]  = 1;
             geom_header.ms_workgroup_size[1]  = 1;
             geom_header.ms_workgroup_size[2]  = 1;
             geom_header.ms_primitive_type     = GeometryChunk::Triangles;
-            geom_header.ms_flags              = 0;
 
             // Pack geometry data
             size_t vertex_data_size = vertices.size() * sizeof(Vertex);
             size_t index_data_size  = indices.size()  * sizeof(uint32_t);
-            size_t total_size       = sizeof(GeometryChunk) + vertex_data_size + index_data_size;
+            size_t total_size       = sizeof(GeometryChunk) + vertex_data_size + index_data_size + meshlet_data.size();
 
             std::vector<uint8_t> geom_data(total_size);
             size_t offset = 0;
@@ -1779,6 +1947,10 @@ void main() {
             std::memcpy(geom_data.data() + offset, vertices.data(), vertex_data_size);
             offset += vertex_data_size;
             std::memcpy(geom_data.data() + offset, indices.data(), index_data_size);
+            offset += index_data_size;
+            if (!meshlet_data.empty()) {
+                std::memcpy(geom_data.data() + offset, meshlet_data.data(), meshlet_data.size());
+            }
 
             asset.add_chunk(ChunkType::GEOM, geom_data, "vec3q_sphere_geometry");
 
@@ -1786,7 +1958,7 @@ void main() {
             MeshShaderGenerator::ShaderConfig config;
             config.max_vertices          = max_verts;
             config.max_primitives        = max_prims;
-            config.workgroup_x           = 8;
+            config.workgroup_x           = 1;
             config.workgroup_y           = 1;
             config.workgroup_z           = 1;
             config.primitive_type        = GeometryChunk::Triangles;
@@ -1805,20 +1977,45 @@ void main() {
                 {VertexAttribute::Float4, 60, 4, "tangent"}
             };
 
-            std::string vertex_shader_glsl = MeshShaderGenerator::generateVertexShader(config);
-            std::string frag_shader_glsl = MeshShaderGenerator::generateTraditionalFragmentShader(config);
-
             tremor::taffy::tools::TaffyAssetCompiler compiler;
-            auto vertex_spirv = compiler.compileGLSLToSpirv(vertex_shader_glsl, shaderc_vertex_shader, "sphere_vertex_shader");
-            auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "sphere_fragment_shader");
+            if (mesh) {
+                std::string mesh_shader_glsl = MeshShaderGenerator::generateMeshShader(config);
+                std::string frag_shader_glsl = MeshShaderGenerator::generateFragmentShader(config);
 
-            if (vertex_spirv.empty() || frag_spirv.empty()) {
-                std::cerr << "❌ Shader compilation failed!" << std::endl;
-                return false;
+                auto mesh_spirv = compiler.compileGLSLToSpirv(mesh_shader_glsl, shaderc_mesh_shader, "sphere_mesh_shader");
+                auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "sphere_fragment_shader");
+
+                if (mesh_spirv.empty() || frag_spirv.empty()) {
+                    std::cerr << "❌ Shader compilation failed!" << std::endl;
+                    return false;
+                }
+
+                if (!createDataDrivenMeshShaderChunk(asset, mesh_spirv, frag_spirv,
+                        geom_header.ms_max_vertices,
+                        geom_header.ms_max_primitives,
+                        geom_header.ms_workgroup_size)) {
+                    return false;
+                }
+            } else {
+                std::string vertex_shader_glsl = MeshShaderGenerator::generateVertexShader(config);
+                std::string frag_shader_glsl = MeshShaderGenerator::generateTraditionalFragmentShader(config);
+
+                auto vertex_spirv = compiler.compileGLSLToSpirv(vertex_shader_glsl, shaderc_vertex_shader, "sphere_vertex_shader");
+                auto frag_spirv = compiler.compileGLSLToSpirv(frag_shader_glsl, shaderc_fragment_shader, "sphere_fragment_shader");
+
+                if (vertex_spirv.empty() || frag_spirv.empty()) {
+                    std::cerr << "❌ Shader compilation failed!" << std::endl;
+                    return false;
+                }
+
+                if (!createDataDrivenShaderChunk(asset, vertex_spirv, frag_spirv)) {
+                    return false;
+                }
             }
 
-            if (!createDataDrivenShaderChunk(asset, vertex_spirv, frag_spirv)) return false;
-            if (!createBasicMaterialChunk(asset))                             return false;
+            if (!createBasicMaterialChunk(asset)) {
+                return false;
+            }
 
             std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
             if (!asset.save_to_file(output_path)) {
