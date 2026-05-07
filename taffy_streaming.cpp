@@ -62,7 +62,8 @@ bool StreamingTaffyLoader::open(const std::string& filepath) {
     }
     
     // Validate magic
-    if (std::strncmp(header_.magic, "TAF!", 4) != 0) {
+    if (std::strncmp(header_.magic, "TAF!", 4) != 0 &&
+        std::strncmp(header_.magic, "TAFO", 4) != 0) {
         std::cerr << "Invalid TAF file magic: " << std::string(header_.magic, 4) << std::endl;
         file_.close();
         return false;
@@ -183,9 +184,26 @@ std::vector<uint8_t> StreamingTaffyLoader::loadChunk(const std::string& name) {
     return loadChunk(static_cast<uint32_t>(index));
 }
 
+std::vector<uint8_t> StreamingTaffyLoader::loadChunk(ChunkType type) {
+    int index = findChunkIndex(type);
+    if (index < 0) {
+        return {};
+    }
+    return loadChunk(static_cast<uint32_t>(index));
+}
+
 int StreamingTaffyLoader::findChunkIndex(const std::string& name) const {
     for (uint32_t i = 0; i < directory_.size(); ++i) {
         if (std::string(directory_[i].name) == name) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+int StreamingTaffyLoader::findChunkIndex(ChunkType type) const {
+    for (uint32_t i = 0; i < directory_.size(); ++i) {
+        if (directory_[i].type == type) {
             return static_cast<int>(i);
         }
     }
@@ -223,6 +241,52 @@ std::vector<uint8_t> StreamingTaffyLoader::loadAudioChunk(uint32_t chunkIndex) {
     return loadChunk(chunkName);
 }
 
+std::optional<ManifestChunk> StreamingTaffyLoader::loadManifest() {
+    auto data = loadChunk(ChunkType::MANF);
+    if (data.size() < sizeof(ManifestChunk)) {
+        return std::nullopt;
+    }
+
+    ManifestChunk manifest{};
+    std::memcpy(&manifest, data.data(), sizeof(ManifestChunk));
+    return manifest;
+}
+
+std::optional<BootstrapChunk> StreamingTaffyLoader::loadBootstrap() {
+    auto data = loadChunk(ChunkType::BOOT);
+    if (data.size() < sizeof(BootstrapChunk)) {
+        return std::nullopt;
+    }
+
+    BootstrapChunk bootstrap{};
+    std::memcpy(&bootstrap, data.data(), sizeof(BootstrapChunk));
+    return bootstrap;
+}
+
+std::vector<DependencyChunk::Entry> StreamingTaffyLoader::loadDependencies() {
+    auto data = loadChunk(ChunkType::DEPS);
+    if (data.size() < sizeof(DependencyChunk)) {
+        return {};
+    }
+
+    DependencyChunk deps{};
+    std::memcpy(&deps, data.data(), sizeof(DependencyChunk));
+
+    const size_t expectedSize = sizeof(DependencyChunk) +
+        static_cast<size_t>(deps.dependency_count) * sizeof(DependencyChunk::Entry);
+    if (data.size() < expectedSize) {
+        return {};
+    }
+
+    std::vector<DependencyChunk::Entry> entries(deps.dependency_count);
+    if (deps.dependency_count > 0) {
+        std::memcpy(entries.data(),
+            data.data() + sizeof(DependencyChunk),
+            static_cast<size_t>(deps.dependency_count) * sizeof(DependencyChunk::Entry));
+    }
+    return entries;
+}
+
 StreamingTaffyHandle StreamingTaffyLoader::createHandle(const std::string& filepath) {
     auto loader = std::make_shared<StreamingTaffyLoader>();
     if (!loader->open(filepath)) {
@@ -243,6 +307,31 @@ void StreamingTaffyLoader::preloadChunks(const std::vector<uint32_t>& indices) {
     for (uint32_t index : indices) {
         loadChunk(index); // This will cache the chunk
     }
+}
+
+bool StreamingTaffyLoader::ensureChunkCached(uint32_t index) {
+    if (index >= directory_.size()) {
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        if (chunk_cache_.find(index) != chunk_cache_.end()) {
+            return true;
+        }
+    }
+
+    auto data = loadChunk(index);
+    return !data.empty();
+}
+
+const std::vector<uint8_t>* StreamingTaffyLoader::getCachedChunkData(uint32_t index) const {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto it = chunk_cache_.find(index);
+    if (it == chunk_cache_.end()) {
+        return nullptr;
+    }
+    return &it->second.data;
 }
 
 void StreamingTaffyLoader::clearCache() {

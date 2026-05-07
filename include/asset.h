@@ -38,6 +38,10 @@ namespace Taffy {
         header_.feature_flags = flags;
     }
 
+    void Asset::set_dependency_count(uint32_t count) {
+        header_.dependency_count = count;
+    }
+
     std::string Asset::get_creator() const {
         return std::string(header_.creator);
     }
@@ -48,6 +52,10 @@ namespace Taffy {
 
     FeatureFlags Asset::get_feature_flags() const {
         return header_.feature_flags;
+    }
+
+    uint32_t Asset::get_dependency_count() const {
+        return header_.dependency_count;
     }
 
     // =============================================================================
@@ -92,10 +100,46 @@ namespace Taffy {
         return false;
     }
 
+    bool Asset::has_chunk_named(const std::string& name) const {
+        for (const auto& entry : chunk_directory_) {
+            if (entry.name == name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::optional<std::vector<uint8_t>> Asset::get_chunk_data(ChunkType type) const {
         for (size_t i = 0; i < chunk_directory_.size(); ++i) {
             if (chunk_directory_[i].type == type) {
                 return chunk_data_[i];
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<std::vector<uint8_t>> Asset::get_chunk_data(const std::string& name) const {
+        for (size_t i = 0; i < chunk_directory_.size(); ++i) {
+            if (chunk_directory_[i].name == name) {
+                return chunk_data_[i];
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<ChunkDirectoryEntry> Asset::get_chunk_entry(ChunkType type) const {
+        for (const auto& entry : chunk_directory_) {
+            if (entry.type == type) {
+                return entry;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<ChunkDirectoryEntry> Asset::get_chunk_entry(const std::string& name) const {
+        for (const auto& entry : chunk_directory_) {
+            if (entry.name == name) {
+                return entry;
             }
         }
         return std::nullopt;
@@ -111,6 +155,10 @@ namespace Taffy {
             types.push_back(entry.type);
         }
         return types;
+    }
+
+    const std::vector<ChunkDirectoryEntry>& Asset::get_chunk_directory() const {
+        return chunk_directory_;
     }
 
     // =============================================================================
@@ -177,7 +225,8 @@ namespace Taffy {
         }
 
         // Validate magic
-        if (std::strncmp(header_.magic, "TAF!", 4) != 0) {
+        if (std::strncmp(header_.magic, "TAF!", 4) != 0 &&
+            std::strncmp(header_.magic, "TAFO", 4) != 0) {
             std::cerr << "❌ Invalid asset magic: " << std::string(header_.magic, 4) << std::endl;
             return false;
         }

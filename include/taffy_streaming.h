@@ -6,6 +6,7 @@
 #include <memory>
 #include <unordered_map>
 #include <mutex>
+#include <optional>
 #include "taffy.h"
 
 namespace Taffy {
@@ -57,12 +58,16 @@ public:
     
     // Load a specific chunk by index
     std::vector<uint8_t> loadChunk(uint32_t index);
+
+    // Load a chunk by type
+    std::vector<uint8_t> loadChunk(ChunkType type);
     
     // Load a chunk by name
     std::vector<uint8_t> loadChunk(const std::string& name);
     
     // Find chunk index by name
     int findChunkIndex(const std::string& name) const;
+    int findChunkIndex(ChunkType type) const;
     
     // Get chunk info without loading data
     const ChunkDirectoryEntry* getChunkInfo(const std::string& name) const;
@@ -73,6 +78,11 @@ public:
     
     // Load audio chunk by sequential index (for streaming audio)
     std::vector<uint8_t> loadAudioChunk(uint32_t chunkIndex);
+
+    // Convenience accessors for package-level metadata
+    std::optional<ManifestChunk> loadManifest();
+    std::optional<BootstrapChunk> loadBootstrap();
+    std::vector<DependencyChunk::Entry> loadDependencies();
     
     // Get total number of chunks
     uint32_t getChunkCount() const { return header_.chunk_count; }
@@ -82,6 +92,10 @@ public:
     
     // Preload specific chunks into cache
     void preloadChunks(const std::vector<uint32_t>& indices);
+
+    // Ensure a chunk is cached, then return a stable pointer to cached data.
+    bool ensureChunkCached(uint32_t index);
+    const std::vector<uint8_t>* getCachedChunkData(uint32_t index) const;
     
     // Clear chunk cache
     void clearCache();

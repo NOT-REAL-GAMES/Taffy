@@ -118,6 +118,8 @@ namespace Taffy {
         }
 
         enum class ChunkType : uint32_t {
+            MANF = 0x464E414D,  // 'MANF'
+            BOOT = 0x544F4F42,  // 'BOOT'
             GEOM = 0x4D4F4547,  // 'GEOM'
             MTRL = 0x4C52544D,  // 'MTRL'
             SHDR = 0x52444853,  // 'SHDR'
@@ -173,6 +175,67 @@ namespace Taffy {
         // CHUNK STRUCTURES
         // =============================================================================
 #pragma pack(push, 1)
+
+        enum class PackageProfile : uint32_t {
+            Asset = 0,
+            Scene = 1,
+            Game = 2
+        };
+
+        struct ManifestChunk {
+            uint32_t schema_version;          // Manifest schema version
+            PackageProfile profile;           // asset / scene / game
+            uint32_t package_flags;           // Reserved for runtime package flags
+            uint32_t chunk_metadata_flags;    // Reserved for future directory side tables
+            char package_name[64];
+            char package_version[32];
+            char build_id[32];
+            char entry_catalog[32];           // Optional named catalog chunk
+            uint32_t required_engine_version[3];
+            uint32_t reserved[12];
+        };
+
+        struct BootstrapChunk {
+            char startup_scene[32];           // Named chunk or catalog key
+            char startup_code[32];            // Named code/script chunk
+            char startup_ui[32];              // Named UI chunk
+            char startup_audio[32];           // Named audio chunk/stream group
+            uint32_t startup_flags;           // Reserved for boot behavior flags
+            uint32_t reserved[15];
+        };
+
+        struct DependencyChunk {
+            uint32_t dependency_count;
+            uint32_t reserved[7];
+
+            enum class ReferenceType : uint32_t {
+                ExternalFile = 0,
+                ExternalTaf = 1,
+                ExternalDirectory = 2
+            };
+
+            enum class Usage : uint32_t {
+                Generic = 0,
+                Scene = 1,
+                Code = 2,
+                UI = 3,
+                Audio = 4,
+                Texture = 5,
+                Geometry = 6,
+                Overlay = 7
+            };
+
+            struct Entry {
+                ReferenceType reference_type;
+                Usage usage;
+                uint32_t flags;               // Bit 0: optional, Bit 1: package-relative path
+                char logical_name[32];        // Stable in-package alias
+                char path[256];               // External path or loose file reference
+                char version_tag[32];         // Optional version/mod channel
+                uint64_t content_hash;        // Optional future integrity/hash field
+                uint32_t reserved[4];
+            };
+        };
 
         struct GeometryChunk {
             uint32_t vertex_count;
@@ -546,9 +609,11 @@ namespace Taffy {
             inline void set_creator(const std::string& creator);
             inline void set_description(const std::string& description);
             inline void set_feature_flags(FeatureFlags flags);
+            inline void set_dependency_count(uint32_t count);
             inline std::string get_creator() const;
             inline std::string get_description() const;
             inline FeatureFlags get_feature_flags() const;
+            inline uint32_t get_dependency_count() const;
 
             // Feature checking
             inline bool has_feature(FeatureFlags flag) const;
@@ -556,10 +621,15 @@ namespace Taffy {
             // Chunk management
             inline void add_chunk(ChunkType type, const std::vector<uint8_t>& data, const std::string& name = "");
             inline bool has_chunk(ChunkType type) const;
+            inline bool has_chunk_named(const std::string& name) const;
             inline bool remove_chunk(ChunkType type);
             inline std::optional<std::vector<uint8_t>> get_chunk_data(ChunkType type) const;
+            inline std::optional<std::vector<uint8_t>> get_chunk_data(const std::string& name) const;
+            inline std::optional<ChunkDirectoryEntry> get_chunk_entry(ChunkType type) const;
+            inline std::optional<ChunkDirectoryEntry> get_chunk_entry(const std::string& name) const;
             inline size_t get_chunk_count() const;
             inline std::vector<ChunkType> get_chunk_types() const;
+            inline const std::vector<ChunkDirectoryEntry>& get_chunk_directory() const;
 
             inline uint64_t get_file_size() const;
 
