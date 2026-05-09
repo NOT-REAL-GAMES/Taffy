@@ -291,6 +291,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(Taffy PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-std=c++23>)
 endif()
 
+if(MSVC)
+    target_compile_options(Taffy PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+    target_compile_options(taffy_compiler PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+endif()
+
 # Define USE_SHADERC if we have it
 if(SHADERC_FOUND)
 #    target_compile_definitions(taffy_compiler PRIVATE USE_SHADERC)
